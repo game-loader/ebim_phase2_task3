@@ -29,6 +29,9 @@ base/tmr_cycle/maps/
 base/tmr_navigation/install/
 base/tmr_navigation/build/
 base/tmr_navigation/log/
+hosts/arm/teleoperation_overlay/build/
+hosts/arm/teleoperation_overlay/install/
+hosts/arm/teleoperation_overlay/log/
 
 # Local configuration and editors
 .env

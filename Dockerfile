@@ -68,6 +68,7 @@ COPY configs/ /app/configs/
 COPY assets/ /app/assets/
 COPY site/ /app/site/
 COPY base/ /app/base/
+COPY hosts/ /app/hosts/
 COPY tests/ /app/tests/
 COPY docs/ /app/docs/
 COPY README.md LICENSE THIRD_PARTY_NOTICES.md /app/

@@ -1,0 +1,10 @@
+# Field configuration for the TMR Robotiq 2F-85 grippers.
+# Source of record: /home/aup/ros2_ws/backups/config_snapshot_20260812T125312+0800
+
+LEFT:
+  com_port: "/dev/serial/by-id/usb-FTDI_USB_TO_RS-485_DAANVRU5-if00-port0"
+  namespace: "left/gripper"
+
+RIGHT:
+  com_port: "/dev/serial/by-id/usb-FTDI_USB_TO_RS-485_DAANTK6Q-if00-port0"
+  namespace: "right/gripper"

@@ -1,0 +1,5 @@
+# Single-gripper convenience config using the left Robotiq 2F-85 adapter.
+
+FR3:
+  com_port: "/dev/serial/by-id/usb-FTDI_USB_TO_RS-485_DAANTK6Q-if00-port0"
+  namespace: "gripper"

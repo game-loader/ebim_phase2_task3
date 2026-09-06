@@ -1,0 +1,7 @@
+/**:
+  ros__parameters:
+    general:
+      grab_resolution: HD720
+      pub_resolution: CUSTOM
+      pub_downscale_factor: 2.0
+      pub_frame_rate: 30.0

@@ -1,0 +1,59 @@
+# Foot-pedal -> TMR motion mapping.
+#
+# Pedal tokens are published by pedal_state_publisher on /pedal/state as
+# "1A 1B 1C 2A 2B 2C" (switch index 1/2 + pedal letter a/b/c), joined with '+'
+# when several are pressed at once (e.g. "1A+2C"), or "NONE".
+#
+# Exact mapping requested:
+#   FS1.a -> x+     FS2.a -> x-
+#   FS1.b -> y+     FS2.b -> y-
+#   FS1.c -> CW     FS2.c -> CCW
+# Spine combos:  FS1.a + FS2.c -> up,  FS1.c + FS2.a -> down.
+
+base_bridge:
+  ros__parameters:
+    # Confirmed against tams_ws: SwerveDriveController subscribes to "~/cmd_vel" and
+    # tmr.config.yaml sets namespace "", so the fully-resolved topic is the one below.
+    cmd_vel_topic: "/swerve_drive_controller/cmd_vel"
+    frame_id: ""            # TwistStamped header frame; "" is accepted by the controller
+    publish_rate: 20.0      # Hz; must stay above the controller's cmd_vel_timeout of 0.5 s
+    # The controller hard-limits x/y to 0.1 m/s and yaw to 0.1 rad/s (controllers.yaml),
+    # and accelerations to 0.1 m/s^2 / 0.1 rad/s^2. Anything larger is silently clamped,
+    # so keep these at or below the limits. Start conservative for first live tests.
+    linear_speed: 0.05      # m/s applied to x+/x- and y+/y-  (controller max 0.1)
+    angular_speed: 0.05     # rad/s applied to CW/CCW         (controller max 0.1)
+    # per-token contribution; signs give direction, magnitude is scaled by *_speed
+    map_1A_x: 1.0
+    map_2A_x: -1.0
+    map_1B_y: 1.0
+    map_2B_y: -1.0
+    map_1C_yaw: -1.0        # clockwise  (negative angular.z)
+    map_2C_yaw: 1.0         # counter-clockwise (positive angular.z)
+
+spine_bridge:
+  ros__parameters:
+    up_combo: ["1A", "2C"]
+    down_combo: ["1C", "2A"]
+    # Confirmed against tams_ws franka_spine_server/spine_action_server.py: the node is
+    # named "franka_spine_node" and registers every name privately ("~/..."), with the
+    # launch file defaulting to an empty namespace. Note the parameters service is
+    # "get_parameters_spine" - plain "get_parameters" is taken by the standard ROS 2
+    # parameter service, which is why the server renamed it.
+    move_action: "/franka_spine_node/move_absolute"
+    switch_on_service: "/franka_spine_node/switch_on"
+    get_parameters_service: "/franka_spine_node/get_parameters_spine"
+    get_position_service: "/franka_spine_node/get_position"
+    # NOTE: no halt_service. The server's Halt posts to /spine/api/motion:halt, which
+    # does not exist on the device (404) - its swagger declares only motion:quick-stop,
+    # and that is a DS402 emergency stop leaving the spine SwitchedOff. spine_bridge
+    # therefore jogs in short chained steps and simply stops issuing them on release.
+    # 0.05 m/s is the velocity confirmed working by hand on this device with
+    # `ros2 action send_goal .../move_absolute`. The server converts to mm/s and the
+    # device requires a positive integer there, so keep this a multiple of 0.001.
+    velocity: 0.05          # m/s jog speed (-> 50 mm/s)
+    acceleration: 0.05      # m/s^2
+    deceleration: 0.05      # m/s^2
+    jog_step: 0.02          # m per chained move; also the worst-case overshoot on release
+    retry_delay: 0.5        # s to wait after a refused move before retrying
+    limit_margin: 0.005     # m, stop this far inside the reported soft limits
+    pedal_timeout: 0.5      # s without a /pedal/state message -> treat as released

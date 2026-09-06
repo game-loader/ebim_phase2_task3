@@ -1,0 +1,24 @@
+# Stable names for the two PCsensor foot switches.
+#
+# Both switches are identical (VID:PID 3553:b001) and expose an EMPTY USB serial,
+# so they can only be told apart by the physical USB port they are plugged into.
+# We match on ID_PATH: port 2.1 becomes f_pedal_l (switch 1) and port 2.2 becomes
+# f_pedal_r (switch 2). If you move the cables, the identities move with the ports.
+#
+# Each switch exposes three input devices on the same USB path (keyboard, mouse and
+# a third HID interface); ID_INPUT_KEYBOARD=="1" selects the keyboard one, which is
+# the interface that emits the a/b/c keycodes read by pedal_state_publisher.
+#
+# Verify the path for each switch with:
+#   udevadm info -q property -n /dev/input/eventXX | grep -E 'ID_PATH|ID_INPUT'
+# and adjust the ID_PATH== values below if your machine enumerates them differently.
+#
+# Install:
+#   sudo cp configs/99-pcsensor-footswitch.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=input --action=add
+#
+# Result: /dev/f_pedal_l and /dev/f_pedal_r. Note SYMLINK+= is relative to /dev, so
+# these land in /dev, NOT in /dev/input. MODE="0666" avoids needing the input group.
+
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_VENDOR_ID}=="3553", ENV{ID_MODEL_ID}=="b001", ENV{ID_PATH}=="pci-0000:00:14.0-usb-0:2.1:1.0", ENV{ID_INPUT_KEYBOARD}=="1", SYMLINK+="f_pedal_l", MODE="0666"
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_VENDOR_ID}=="3553", ENV{ID_MODEL_ID}=="b001", ENV{ID_PATH}=="pci-0000:00:14.0-usb-0:2.2:1.0", ENV{ID_INPUT_KEYBOARD}=="1", SYMLINK+="f_pedal_r", MODE="0666"

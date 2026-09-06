@@ -1,0 +1,10 @@
+diff --git a/franka_bringup/config/tmr.config.yaml b/franka_bringup/config/tmr.config.yaml
+index bceb6fd..85ff6f7 100644
+--- a/franka_bringup/config/tmr.config.yaml
++++ b/franka_bringup/config/tmr.config.yaml
+@@ -17,4 +17,4 @@ ROBOT1: # Arbitrary identifier for the first robot (a Mnemonic)
+   namespace: "" # Namespace for robot, any string (empty string allowed - meaningful names recommended)
+   robot_ip: "172.16.16.10" # Robot’s IP address or hostname
+   use_fake_hardware: "false" # Use simulated hardware ("true" or "false")
+-  use_rviz: "true" # Launch RViz if "true" (single instance for all namespaces)
++  use_rviz: "false" # Launch RViz if "true" (single instance for all namespaces)

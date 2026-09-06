@@ -1,0 +1,31 @@
+# Field configuration for the Mobile FR3 Duo GELLO devices on the arm host.
+# com_port values are relative to /dev/serial/by-id; main.launch.py prepends that path.
+# Source of record: /home/aup/ros2_ws/backups/config_snapshot_20260812T125312+0800
+
+LEFT:
+  namespace: "left"
+  com_port: "usb-ROBOTIS_OpenRB-150_46BEEC57503059384C2E3120FF072707-if00"
+  num_arm_joints: 7
+  joint_signs: [1, -1, 1, -1, 1, 1, 1]
+  gripper: true
+  assembly_offsets: [0.000, 0.000, 3.142, 3.142, 3.142, 4.712, 0.000]
+  gripper_range_rad: [2.00, 3.22]
+  dynamixel_torque_enable: [0, 0, 0, 0, 0, 0, 0, 0]
+  dynamixel_goal_position: [0.0, 0.0, 0.0, -1.571, 0.0, 1.571, 0.0, 3.509]
+  dynamixel_kp_p: [30, 60, 0, 30, 0, 0, 0, 50]
+  dynamixel_kp_i: [0, 0, 0, 0, 0, 0, 0, 0]
+  dynamixel_kp_d: [250, 100, 80, 60, 30, 10, 5, 0]
+
+RIGHT:
+  namespace: "right"
+  com_port: "usb-ROBOTIS_OpenRB-150_A957F74D503059384C2E3120FF062E1D-if00"
+  num_arm_joints: 7
+  joint_signs: [1, -1, 1, -1, 1, 1, 1]
+  gripper: true
+  assembly_offsets: [0.000, 0.000, 3.142, 3.142, 3.142, 4.712, 0.000]
+  gripper_range_rad: [2.00, 3.22]
+  dynamixel_torque_enable: [0, 0, 0, 0, 0, 0, 0, 0]
+  dynamixel_goal_position: [0.0, 0.0, 0.0, -1.571, 0.0, 1.571, 0.0, 3.509]
+  dynamixel_kp_p: [30, 60, 0, 30, 0, 0, 0, 50]
+  dynamixel_kp_i: [0, 0, 0, 0, 0, 0, 0, 0]
+  dynamixel_kp_d: [250, 100, 80, 60, 30, 10, 5, 0]

@@ -64,6 +64,42 @@ impedance loops run in host-side ROS 2 nodes, not in this container.
 
 ## 2. Software prerequisites on the host
 
+**Nothing below is present on a stock Franka Duo Mobile.** Every package this
+policy talks to — the arm controllers, the gripper manager, the navigation
+routes, the local navigation adapter, the joint servo — is our own code or a
+vendor package carrying our modifications, and all of it is shipped in this
+repository. Section 2.1 lists what to deploy where; Section 4 gives the
+bring-up order.
+
+### 2.1 What is ours, and where it goes
+
+| Tree in this repo | Deploy to | What it is |
+| --- | --- | --- |
+| `hosts/arm/teleoperation_overlay/` | arm host, colcon workspace overlaying `franka_ros2` | **Our arm-side ROS 2 overlay.** Contains `franka_fr3_arm_controllers` — despite its name this is where the **`JointImpedanceController`** lives (it subscribes `/{left,right}/gello/joint_states`, which our servo relay publishes). Carries our modifications: a `k_alpha` filter parameter in the controller, per-arm `franka_robot_state_broadcaster` parameters in `franka.launch.py`, and the `controllers.yaml` robot-state fix. Also `franka_gripper_manager` (Robotiq), `franka_gello_state_publisher`, `franka_spine_msgs`, and the pedal/keyboard teleop bridges (unused by this policy). |
+| `site/franka_duo_joint_servo/` | arm host, colcon | **Our joint servo**: 20-D chunks → KDL IK → 1 kHz Ruckig tracker → gello relay → impedance controller. |
+| `site/franka_duo_ptp_step/` | arm host, colcon | Our homing utility. Not on the mission path. |
+| `src/franka_duo_tele_data/` | this container | The policy. |
+| `base/tmr_cycle/` | base host, `~/tmr_cycle` | **Our navigation routes** (07 outbound, 13 post-grasp, 15 return, 20 placement detour), the exclusive velocity adapter, and live table-leg detection. |
+| `base/tmr_navigation/` | base host, colcon | **Our local navigation adapter package**: odom frame adapter, dual-LiDAR merger, SLAM launch. |
+| `hosts/arm/env/` | arm host `~/` | `tmr_env.sh` + `source_migrated_stack.sh` (sources Jazzy → `franka_ros2` → our overlay) and `cyclonedds.xml` (binds DDS to the arm host's interface). |
+| `hosts/base/home/` | base host `~/` | `start_tmr_sensors.sh`, `zed_override.yaml`, `zed_relaunch.sh`, `cyclonedds.xml`. |
+| `hosts/base/vendor_patches/` | apply to vendor checkouts on the base host | Two small diffs against upstream: `franka_bringup/config/tmr.config.yaml` (`use_rviz: false`) and `zed-ros2-wrapper` configs (30 Hz publish, `depth_mode: NONE`). |
+
+Upstream vendor packages the above build against (not shipped; clone at the
+listed revisions):
+
+| Package | Host | Origin | Revision |
+| --- | --- | --- | --- |
+| `franka_ros2` (incl. `franka_bringup`, `franka_mobile_sensors`, `franka_spine_server`, `franka_description`) | both | github.com/frankarobotics/franka_ros2 | base host: `1006036` (humble); arm host: Jazzy workspace |
+| `libfranka` | both | github.com/frankarobotics/libfranka | `95b406f4` |
+| `ros2_robotiq_gripper` | base | github.com/PickNikRobotics/ros2_robotiq_gripper | `a29c69b` (humble) |
+| `zed-ros2-wrapper` | base | github.com/stereolabs/zed-ros2-wrapper | `458c725` + our patch |
+| `sick_safetyscanners2` | base | github.com/SICKAG/sick_safetyscanners2 | `886a81a` |
+| `olvx_descriptions_module` | base | github.com/olive-robotics/olvx_descriptions_module | `c3444ed` |
+| `gello_software` | both | github.com/wuphilipp/gello_software | `fa0407b` (our overlay forked from this) |
+
+### 2.2 Runtime requirements
+
 The container carries the policy and its Python dependencies. It does **not**
 carry robot drivers; those must already run on the host, because the policy is
 a ROS 2 participant talking to them.
@@ -141,11 +177,14 @@ The base routes (`07_start_to_pickup.py`, `13_post_grasp_route.py`,
 this container. Deploy them once:
 
 ```bash
-# From the checkout, copy both trees to the base host.
+# From the checkout, copy our trees and home scripts to the base host.
 rsync -a base/tmr_cycle/       <user>@<base-host>:~/tmr_cycle/
 rsync -a base/tmr_navigation/  <user>@<base-host>:~/tmr_navigation/
+rsync -a hosts/base/home/      <user>@<base-host>:~/
 
-# On the base host: build the adapter package (once).
+# On the base host: apply the two vendor patches, build the adapter package.
+cd ~/ros2_ws/src/franka_ros2    && git apply ~/vendor_patches/franka_bringup_tmr_config.patch
+cd ~/ros2_ws/src/zed-ros2-wrapper && git apply ~/vendor_patches/zed_ros2_wrapper.patch
 cd ~/tmr_navigation && source /opt/ros/humble/setup.bash && colcon build --symlink-install
 ```
 
@@ -175,15 +214,29 @@ setting.
 ### Arm host
 
 ```bash
-# 1. Arm drivers, one per arm (skip if running).
+# 0. One-time: deploy our overlay and env, then build it on top of franka_ros2.
+rsync -a hosts/arm/teleoperation_overlay/ <user>@<arm-host>:~/recloned_sources/teleoperation_overlay/
+rsync -a hosts/arm/env/tmr_env.sh hosts/arm/env/cyclonedds.xml <user>@<arm-host>:~/
+rsync -a hosts/arm/env/source_migrated_stack.sh <user>@<arm-host>:~/recloned_sources/
+# on the arm host (edit the address in ~/cyclonedds.xml to the host's own interface):
+cd ~/recloned_sources/teleoperation_overlay && source ~/recloned_sources/franka_ros2_jazzy_ws/install/setup.bash \
+  && colcon build --symlink-install
+source ~/tmr_env.sh
+
+# 1. Arm drivers, one per arm (skip if running). This launch file is ours.
 ros2 launch franka_fr3_arm_controllers franka.launch.py \
   arm_id:=fr3v2 arm_prefix:=left namespace:=left robot_ip:=<LEFT_IP> \
   load_gripper:=false joint_sources:=joint_states
 # same for arm_prefix:=right namespace:=right robot_ip:=<RIGHT_IP>
 
-# 2. Robotiq grippers, ZED head camera, spine action server (site launch files).
+# 2. Grippers (ours), spine server (upstream franka_ros2), ZED (upstream wrapper).
+ros2 launch franka_gripper_manager robotiq_gripper_controller_client.launch.py \
+  config_file:=example_fr3_duo_config_robotiq.yaml
+ros2 launch franka_spine_server spine.launch.py spine_ip:=<SPINE_IP>
+ros2 launch zed_wrapper zed_camera.launch.py camera_model:=zedm camera_name:=head_camera \
+  publish_tf:=false ros_params_override_path:=~/zed_override.yaml
 
-# 3. Build the site ROS 2 packages shipped here.
+# 3. Build our joint servo packages from this checkout.
 colcon build --base-paths site --build-base site/build \
   --install-base site/install --merge-install \
   --packages-select franka_duo_joint_servo franka_duo_ptp_step
@@ -367,6 +420,9 @@ site/franka_duo_ptp_step/     ROS 2 pkg: homing utility (not on the mission path
 base/tmr_cycle/             base-host routes (ROS 2 Humble): 07 outbound, 13 post-grasp,
                             15 return, 20 placement detour, velocity adapter, leg detection
 base/tmr_navigation/        base-host adapter pkg: odom frame adapter, dual-LiDAR merger, SLAM launch
+hosts/arm/teleoperation_overlay/  our arm-side ROS 2 overlay incl. the JointImpedanceController
+hosts/arm/env/, hosts/base/home/  env scripts and DDS configs for each host
+hosts/base/vendor_patches/  our two small diffs against upstream franka_ros2 / zed-ros2-wrapper
 scripts/                    operator bring-up scripts
 configs/, assets/           configuration, extrinsics, weights, contract
 tests/                      66 offline tests, no robot required
