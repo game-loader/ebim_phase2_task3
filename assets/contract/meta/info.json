@@ -1,0 +1,194 @@
+{
+  "codebase_version": "v3.0",
+  "fps": 30,
+  "robot_type": "franka_duo",
+  "total_episodes": 24,
+  "total_frames": 9861,
+  "total_tasks": 1,
+  "chunks_size": 1000,
+  "data_files_size_in_mb": 500,
+  "video_files_size_in_mb": 2000,
+  "data_path": "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet",
+  "video_path": "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4",
+  "features": {
+    "timestamp": {
+      "dtype": "float32",
+      "shape": [
+        1
+      ],
+      "names": null
+    },
+    "frame_index": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "names": null
+    },
+    "episode_index": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "names": null
+    },
+    "index": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "names": null
+    },
+    "task_index": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "names": null
+    },
+    "observation.state": {
+      "dtype": "float32",
+      "shape": [
+        20
+      ],
+      "names": [
+        "left_x",
+        "left_y",
+        "left_z",
+        "left_rot6d_row0_x",
+        "left_rot6d_row0_y",
+        "left_rot6d_row0_z",
+        "left_rot6d_row1_x",
+        "left_rot6d_row1_y",
+        "left_rot6d_row1_z",
+        "right_x",
+        "right_y",
+        "right_z",
+        "right_rot6d_row0_x",
+        "right_rot6d_row0_y",
+        "right_rot6d_row0_z",
+        "right_rot6d_row1_x",
+        "right_rot6d_row1_y",
+        "right_rot6d_row1_z",
+        "left_gripper_open",
+        "right_gripper_open"
+      ]
+    },
+    "action": {
+      "dtype": "float32",
+      "shape": [
+        20
+      ],
+      "names": [
+        "left_x",
+        "left_y",
+        "left_z",
+        "left_rot6d_row0_x",
+        "left_rot6d_row0_y",
+        "left_rot6d_row0_z",
+        "left_rot6d_row1_x",
+        "left_rot6d_row1_y",
+        "left_rot6d_row1_z",
+        "right_x",
+        "right_y",
+        "right_z",
+        "right_rot6d_row0_x",
+        "right_rot6d_row0_y",
+        "right_rot6d_row0_z",
+        "right_rot6d_row1_x",
+        "right_rot6d_row1_y",
+        "right_rot6d_row1_z",
+        "left_gripper_open",
+        "right_gripper_open"
+      ]
+    },
+    "observation.source_timestamp_ns": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "names": null
+    },
+    "observation.sync_skew_ns": {
+      "dtype": "int64",
+      "shape": [
+        4
+      ],
+      "names": [
+        "wrist_left",
+        "wrist_right",
+        "left_pose",
+        "right_pose"
+      ]
+    },
+    "observation.images.head": {
+      "dtype": "video",
+      "shape": [
+        360,
+        640,
+        3
+      ],
+      "names": [
+        "height",
+        "width",
+        "channel"
+      ],
+      "info": {
+        "video.is_depth_map": false,
+        "video.height": 360,
+        "video.width": 640,
+        "video.channels": 3,
+        "video.fps": 30,
+        "video.codec": "h264",
+        "video.pix_fmt": "yuv420p"
+      }
+    },
+    "observation.images.wrist_left": {
+      "dtype": "video",
+      "shape": [
+        270,
+        480,
+        3
+      ],
+      "names": [
+        "height",
+        "width",
+        "channel"
+      ],
+      "info": {
+        "video.is_depth_map": false,
+        "video.height": 270,
+        "video.width": 480,
+        "video.channels": 3,
+        "video.fps": 30,
+        "video.codec": "h264",
+        "video.pix_fmt": "yuv420p"
+      }
+    },
+    "observation.images.wrist_right": {
+      "dtype": "video",
+      "shape": [
+        270,
+        480,
+        3
+      ],
+      "names": [
+        "height",
+        "width",
+        "channel"
+      ],
+      "info": {
+        "video.is_depth_map": false,
+        "video.height": 270,
+        "video.width": 480,
+        "video.channels": 3,
+        "video.fps": 30,
+        "video.codec": "h264",
+        "video.pix_fmt": "yuv420p"
+      }
+    }
+  },
+  "splits": {
+    "train": "0:24"
+  }
+}

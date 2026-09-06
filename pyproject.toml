@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "franka-duo-table-mission"
+version = "1.0.0"
+description = "Cup/bowl mobile pick-and-place on a Franka Duo Mobile: navigation, spine, YOLO perception and impedance execution"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+
+# ROS 2 Python packages (rclpy, sensor_msgs, ...) come from the host's sourced
+# installation, never from PyPI. Only the non-ROS parts are declared here.
+dependencies = [
+    "numpy>=1.23.5,<2.3.0",
+    "PyYAML>=6.0.2,<7.0.0",
+]
+
+[project.optional-dependencies]
+# Perception. opencv-python-headless is used because the robot host has no
+# desktop session; the host's system cv2 also satisfies the import.
+perception = [
+    "ultralytics>=8.3.0,<9.0.0",
+    "opencv-python-headless>=4.9.0,<5.0.0",
+]
+dev = [
+    "pytest>=8.1.0,<9.0.0",
+    "pytest-timeout>=2.4.0,<3.0.0",
+    "ruff>=0.14.1,<0.15.0",
+]
+
+[project.scripts]
+franka-duo-table-mission = "franka_duo_tele_data.table_mission:main"
+franka-duo-table-grasp = "franka_duo_tele_data.table_grasp_stage:main"
+franka-duo-table-place = "franka_duo_tele_data.table_place_stage:main"
+franka-duo-spine = "franka_duo_tele_data.spine_client:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "T20", "N", "UP", "SIM"]
+ignore = ["E501", "T201", "T203", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "F403", "E402"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+known-first-party = ["franka_duo_tele_data"]

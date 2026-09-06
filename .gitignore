@@ -1,0 +1,34 @@
+# Runtime output. Never commit robot data, logs or checkpoints.
+outputs/
+log/
+*.log
+*.jsonl
+
+# Python and tooling
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# colcon build products. The site ROS 2 packages are built on the robot host.
+site/build/
+site/install/
+site/log/
+
+# Local configuration and editors
+.env
+.env.*
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+.claude/
+
+# Ultralytics runtime state
+.ultralytics/
