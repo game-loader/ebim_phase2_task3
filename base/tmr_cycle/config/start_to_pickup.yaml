@@ -1,0 +1,100 @@
+# One-process route used by scripts/07_start_to_pickup.py.
+# All distances are metres.  +x is robot forward, +y is robot left, +yaw is CCW.
+
+interfaces:
+  odom_topic: /swerve_drive_controller/odom
+  # Exclusive mission channel.  cmd_vel_adapter latches this owner and ignores
+  # legacy manual/Nav2 commands until mission_active is explicitly released.
+  command_topic: /tmr_cycle/mission_cmd_vel
+  mission_lease_topic: /tmr_cycle/mission_active
+  adapter_output_topic: /swerve_drive_controller/cmd_vel
+  legacy_manual_topic: /tmr_cycle/cmd_vel
+  scan_topics: [/lidar_front/scan, /lidar_rear/scan]
+  map_topic: /map
+  base_frame: base_link
+  state_topic: /tmr_cycle/route_state
+
+mission:
+  initial_forward_m: 0.85
+  clockwise_turn_deg: 90.0
+  # Base-centre targets measured along the detected door normal.
+  before_door_m: 0.50
+  forward_from_before_door_m: 1.20
+
+footprint:
+  # These must describe the complete carried envelope, not only the white base.
+  front_m: 0.40
+  rear_m: 0.40
+  width_m: 0.58
+  rotation_clearance_m: 0.60
+
+motion:
+  initial_speed_mps: 0.10
+  align_speed_mps: 0.065
+  door_speed_mps: 0.070
+  table_search_speed_mps: 0.070
+  table_approach_speed_mps: 0.050
+  turn_speed_rps: 0.18
+  max_yaw_correction_rps: 0.07
+  position_tolerance_m: 0.025
+  yaw_tolerance_deg: 2.0
+  max_heading_error_deg: 7.0
+  no_progress_timeout_s: 2.5
+  segment_timeout_s: 45.0
+
+safety:
+  brake_accel_mps2: 0.25
+  reaction_time_s: 0.25
+  hard_margin_m: 0.08
+  slowdown_extra_m: 0.18
+  side_margin_m: 0.055
+  # Raw lidars can see chassis/cables.  Only points inside the measured body
+  # rectangle plus this small pad are removed before collision checking.
+  self_mask_padding_m: 0.015
+  scan_stale_s: 0.30
+  odom_stale_s: 0.30
+  minimum_slow_hits: 2
+  # OccupancyGrid is secondary evidence and can contain isolated SLAM speckles.
+  # Require a small connected cluster; live LiDAR keeps a one-beam hard stop.
+  # The live map contains small self-return speckles during startup.  Treat it
+  # only as strong supporting evidence; the dual raw LiDAR guard remains live.
+  map_minimum_occupied_cluster_cells: 12
+  # A hard-zone return, stale sensor, lost velocity subscriber, or no progress
+  # latches ABORT.  The process only publishes zero after that point.
+
+door:
+  local_collect_s: 2.2
+  beam_stride: 2
+  side_margin_m: 0.09
+  maximum_width_m: 1.60
+  predoor_clearance_m: 0.22
+  postdoor_clearance_m: 0.18
+  midpoint_stability_m: 0.08
+  width_stability_m: 0.10
+  normal_stability_deg: 5.0
+  minimum_partition_detections: 2
+  # The runtime /map is used for the coarse candidate/cross-check.  The live
+  # dual-LiDAR free-through evidence remains the final geometry and hard guard.
+  map_max_age_s: 3.0
+  occupied_threshold: 65
+  free_threshold: 25
+
+table:
+  # Search is relative to the post-turn/frozen doorway frame, not map pixels.
+  search_max_forward_m: 1.60
+  rolling_window_s: 1.20
+  min_observations: 3
+  stable_midpoint_m: 0.08
+  roi_ahead_m: [0.25, 1.55]
+  roi_left_m: [0.08, 1.45]
+  grid_resolution: 0.025
+  cluster_connect_distance: 0.060
+  min_cell_hits: 2
+  min_cluster_hits: 8
+  max_leg_diameter: 0.20
+  expected_pair_spacing_m: 0.66
+  pair_spacing_tolerance_m: 0.20
+  expected_pair_axis_deg: 90.0
+  pair_axis_tolerance_deg: 25.0
+  ambiguity_score_margin: 0.22
+  desired_front_clearance_m: 0.30

@@ -135,9 +135,25 @@ testbed. Passwordless SSH from the container to the base host is required:
 mount a key with `-v ~/.ssh:/root/.ssh:ro`.
 
 The base routes (`07_start_to_pickup.py`, `13_post_grasp_route.py`,
-`15_return_from_letter.py`, `20_after_return_placement.py`) live on the base
-host in the `tmr_cycle` tree and are called by name; they are not part of this
-image.
+`15_return_from_letter.py`, `20_after_return_placement.py`) are shipped in
+**`base/tmr_cycle/`**, together with the local navigation adapter package in
+**`base/tmr_navigation/`**. They run on the base host under ROS 2 Humble, not in
+this container. Deploy them once:
+
+```bash
+# From the checkout, copy both trees to the base host.
+rsync -a base/tmr_cycle/       <user>@<base-host>:~/tmr_cycle/
+rsync -a base/tmr_navigation/  <user>@<base-host>:~/tmr_navigation/
+
+# On the base host: build the adapter package (once).
+cd ~/tmr_navigation && source /opt/ros/humble/setup.bash && colcon build --symlink-install
+```
+
+The mission calls the routes by name under `--base-root` (default
+`/home/tmr-user/tmr_cycle`). Two site-specific changes are already applied in
+this copy: the step-20 detour shifts left **0.85 m**, and its table-leg ROI is
+referenced to the pose the base is standing in when the detour starts, so no
+saved START capture is needed.
 
 ---
 
@@ -146,7 +162,7 @@ image.
 ### Base host
 
 ```bash
-cd <base-routes>
+cd ~/tmr_cycle            # the deployed copy of base/tmr_cycle (Section 3)
 bash scripts/19_ensure_navigation_stack.sh   # controller, odometry, dual LiDAR, SLAM, velocity adapter
 bash scripts/17_control_mode.sh mission      # take the exclusive mission velocity lease
 ```
@@ -348,6 +364,9 @@ src/franka_duo_tele_data/   policy
   rgb20d_io.py, action_spec.py  20-D observation/action contract
 site/franka_duo_joint_servo/  ROS 2 pkg: KDL IK -> Ruckig -> impedance relay
 site/franka_duo_ptp_step/     ROS 2 pkg: homing utility (not on the mission path)
+base/tmr_cycle/             base-host routes (ROS 2 Humble): 07 outbound, 13 post-grasp,
+                            15 return, 20 placement detour, velocity adapter, leg detection
+base/tmr_navigation/        base-host adapter pkg: odom frame adapter, dual-LiDAR merger, SLAM launch
 scripts/                    operator bring-up scripts
 configs/, assets/           configuration, extrinsics, weights, contract
 tests/                      66 offline tests, no robot required

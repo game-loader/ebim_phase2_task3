@@ -1,0 +1,79 @@
+frame_id: map
+route_frame: mission_start
+
+# Optional local mapping gesture. The robot moves left in its initial body
+# frame, rotates once, then returns to the same physical start pose.
+bootstrap_mapping:
+  odom_frame: odom
+  base_frame: base_link
+  left_distance: 0.25
+  translate_speed: 0.05
+  forward_correction_speed: 0.03
+  rotate_speed: 0.18
+  max_linear_accel: 0.15
+  max_angular_accel: 0.28
+  rotation_deg: 360.0
+  position_tolerance: 0.025
+  yaw_tolerance_deg: 2.0
+  translation_obstacle_distance: 0.55
+  translation_corridor_half_width: 0.45
+  rotation_clearance: 0.60
+  translation_timeout_sec: 15.0
+  rotation_timeout_sec: 50.0
+  return_to_start: true
+
+# Coordinates are metres/degrees relative to the robot pose captured when
+# execute_cycle.py starts. +x is initial forward; +y is initial left.
+points:
+  p1_start: {x: 0.00, y: 0.00, yaw_deg: 0.0}
+  table_observe: {x: 1.30, y: 0.00, yaw_deg: 0.0}
+  pickup_fallback: {x: 1.83, y: 0.00, yaw_deg: 0.0}
+  room_exit: {x: 0.00, y: 0.00, yaw_deg: -180.0}
+  inspect_end: {x: 0.06, y: 3.32, yaw_deg: -180.0}
+
+# Approximate near-leg geometry extracted from final_clean_20260828_144206.
+# Detection is restricted to this start-relative region and must be unique.
+table_detection:
+  collect_sec: 4.0
+  min_scan_frames: 12
+  roi:
+    x: [1.65, 2.65]
+    y: [-0.90, 0.60]
+  grid_resolution: 0.025
+  cluster_connect_distance: 0.060
+  min_cell_hits: 3
+  min_cluster_hits: 10
+  max_leg_diameter: 0.20
+  expected_pair_spacing: 0.66
+  pair_spacing_tolerance: 0.20
+  expected_pair_axis_deg: 90.0
+  pair_axis_tolerance_deg: 22.0
+  expected_pair_midpoint: [2.15, -0.16]
+  max_midpoint_shift: 0.45
+  ambiguity_score_margin: 0.30
+  approach_standoff: 0.55
+  max_approach_shift: 0.55
+
+cycle:
+  return_to_start: true
+  arm_timeout_sec: 120.0
+  navigation_timeout_sec: 180.0
+  strafe_timeout_sec: 60.0
+
+strafe:
+  max_side_speed: 0.12
+  max_forward_correction: 0.05
+  max_yaw_speed: 0.25
+  position_tolerance: 0.08
+  yaw_tolerance_deg: 5.0
+  obstacle_stop_distance: 0.65
+  obstacle_corridor_half_width: 0.45
+
+topics:
+  manual_cmd: /tmr_cycle/cmd_vel
+  scan: /navigation/scan
+  arm_command: /tmr_cycle/arm_command
+  arm_done: /tmr_cycle/arm_done
+  perception_command: /tmr_cycle/perception_command
+  detected_legs: /tmr_cycle/detected_legs
+  detected_pickup_pose: /tmr_cycle/detected_pickup_pose

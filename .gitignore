@@ -20,6 +20,16 @@ site/build/
 site/install/
 site/log/
 
+# Base-host runtime state; only the route code is versioned.
+base/tmr_cycle/logs/
+base/tmr_cycle/state/
+base/tmr_cycle/outputs/
+base/tmr_cycle/backups/
+base/tmr_cycle/maps/
+base/tmr_navigation/install/
+base/tmr_navigation/build/
+base/tmr_navigation/log/
+
 # Local configuration and editors
 .env
 .env.*
