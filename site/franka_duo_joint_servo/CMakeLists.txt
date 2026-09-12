@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
 find_package(eigen3_cmake_module REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(moveit_core REQUIRED)
@@ -16,6 +17,8 @@ find_package(rclcpp REQUIRED)
 find_package(ruckig REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+
+ament_python_install_package(${PROJECT_NAME})
 
 add_executable(policy_chunk_joint_servo src/policy_chunk_joint_servo.cpp)
 target_include_directories(policy_chunk_joint_servo PRIVATE
@@ -37,11 +40,15 @@ ament_target_dependencies(gello_target_relay
   std_msgs
 )
 
+add_executable(check_robot_model src/check_robot_model.cpp)
+ament_target_dependencies(check_robot_model moveit_core moveit_ros_planning rclcpp)
+
 install(
-  TARGETS policy_chunk_joint_servo gello_target_relay
+  TARGETS policy_chunk_joint_servo gello_target_relay check_robot_model
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY include/ DESTINATION include)
+install(DIRECTORY model/ DESTINATION share/${PROJECT_NAME}/model)
 install(
   DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch
@@ -52,7 +59,7 @@ install(
   DESTINATION share/${PROJECT_NAME}/config
   FILES_MATCHING PATTERN "*.yaml"
 )
-install(FILES README.md DESTINATION share/${PROJECT_NAME})
+install(FILES README.md MODEL.md DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)

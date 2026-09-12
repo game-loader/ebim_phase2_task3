@@ -4,8 +4,8 @@ from pathlib import Path
 import unittest
 
 
-ROOT = Path(__file__).resolve().parents[2]
-SOURCE = (ROOT / "base" / "scripts" / "17_control_mode.sh").read_text(encoding="utf-8")
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE = (ROOT / "scripts" / "17_control_mode.sh").read_text(encoding="utf-8")
 
 
 class ControlModeContracts(unittest.TestCase):

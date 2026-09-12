@@ -52,7 +52,7 @@ class StartNavigationScriptTests(unittest.TestCase):
 
     def test_upper_stack_waits_for_active_controller_odom_and_both_lidars(self):
         manager = SCRIPT.index('wait_for_controller_manager "${base_pid}"')
-        active = SCRIPT.index("\n  ensure_swerve_active\n", manager)
+        active = SCRIPT.index("ensure_swerve_active", manager)
         odom = SCRIPT.index("wait_for_topic_once /swerve_drive_controller/odom", active)
         lidars = SCRIPT.index("start_process lidars", odom)
         front = SCRIPT.index("wait_for_topic_once /lidar_front/scan", lidars)

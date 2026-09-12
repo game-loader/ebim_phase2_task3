@@ -14,9 +14,9 @@
         state_interfaces:
           robot_state
 
-/**:
   joint_impedance_controller:
     ros__parameters:
+      arm_id: fr3v2
       k_alpha: 0.99
       k_gains:
         - 240.0

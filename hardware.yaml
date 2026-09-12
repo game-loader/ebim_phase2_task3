@@ -1,0 +1,47 @@
+# Connection profile for the inspected robot. No credentials belong in this file.
+# This profile supports the original TMR FR3v2 Duo mounting geometry only.
+version: 1
+profile: tmr_fr3v2_duo
+hosts:
+  arm:
+    # All arm software runs inside the image; only the base uses SSH.
+    dds_address: 172.16.0.100
+  base:
+    # Reached from the local arm host, using its existing SSH authentication.
+    ssh: tmr-user@172.16.0.50
+    runtime_root: /home/tmr-user/ebim_cup_bowl_runtime
+    ros_setup: /opt/ros/humble/setup.bash
+    overlays:
+      - /home/tmr-user/ros2_ws/install/setup.bash
+    dds_address: 172.16.0.50
+domains:
+  arm: 0
+  base: 97
+image: franka-duo-table-mission:phase2
+arms:
+  mode: managed
+  left_ip: 172.16.16.12
+  right_ip: 172.16.16.11
+grippers:
+  mode: managed
+  left_port: /dev/serial/by-id/usb-FTDI_USB_TO_RS-485_DAANVRU5-if00-port0
+  right_port: /dev/serial/by-id/usb-FTDI_USB_TO_RS-485_DAANTK6Q-if00-port0
+spine:
+  mode: managed
+  ip: 172.16.16.10
+base:
+  mode: managed
+  ip: 172.16.16.10
+lidars:
+  mode: managed
+  front_ip: 172.16.16.60
+  rear_ip: 172.16.16.61
+  host_ip: 172.16.16.50
+camera:
+  mode: managed
+  serial: 17064700
+  # The existing policy calibration assumes this camera and mounting geometry.
+  calibration: configs/zed_pnp_calibration.json
+runtime:
+  playback_speed: 0.1
+  ready_timeout_s: 120

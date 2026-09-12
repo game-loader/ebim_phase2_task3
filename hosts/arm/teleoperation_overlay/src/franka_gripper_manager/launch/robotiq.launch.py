@@ -102,15 +102,6 @@ def generate_nodes(context: LaunchContext):
         )
     }
 
-    # TODO: file does not exist
-    update_rate_config_file = PathJoinSubstitution(
-        [
-            description_pkg_share,
-            "config",
-            "robotiq_update_rate.yaml",
-        ]
-    )
-
     controllers_file = "robotiq_controllers.yaml"
     initial_joint_controllers = PathJoinSubstitution(
         [gripper_pkg_share, "config", controllers_file]
@@ -120,9 +111,10 @@ def generate_nodes(context: LaunchContext):
         package="controller_manager",
         executable="ros2_control_node",
         namespace=namespace,
+        remappings=[("robot_description", f"/{namespace}/robot_description"),
+                    ("~/robot_description", f"/{namespace}/robot_description")],
         parameters=[
             robot_description_param,
-            update_rate_config_file,
             initial_joint_controllers,
         ],
     )

@@ -73,7 +73,7 @@
 import xacro
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
-from launch.actions import OpaqueFunction, Shutdown
+from launch.actions import OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.conditions import UnlessCondition, IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -141,12 +141,12 @@ def generate_robot_nodes(context):
                 {"namespace": namespace},
                 {"load_gripper": load_gripper},
             ],
-            remappings=[("joint_states", "franka/joint_states")],
+            remappings=[("robot_description", f"/{namespace}/robot_description"),
+                        ("~/robot_description", f"/{namespace}/robot_description")],
             output={
                 "stdout": "screen",
                 "stderr": "screen",
             },
-            on_exit=Shutdown(),
         ),
         Node(
             package="joint_state_publisher",
@@ -167,7 +167,8 @@ def generate_robot_nodes(context):
             package="controller_manager",
             executable="spawner",
             namespace=namespace,
-            arguments=["joint_state_broadcaster"],
+            arguments=["joint_state_broadcaster", "--controller-ros-args",
+                       "--remap joint_states:=franka/joint_states"],
             output="screen",
         ),
         Node(

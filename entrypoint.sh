@@ -8,14 +8,20 @@
 #   place   ...         one placement only (--mode test | final)
 #   spine   --target-m X [--execute]
 #   selftest            offline tests, no robot required
+#   model-check         offline model loading and dual-arm FK/IK checks
+#   servo               joint target generator only; does not activate controllers
+#   relay               relay, robot publication disabled unless explicitly enabled
 #   shell               interactive shell with the environment ready
+#   hardware ...        complete arm runtime and two-host orchestration
 set -euo pipefail
 
 # ROS setup files probe optional unset variables; enable nounset after them.
 set +u
 source /opt/ros/jazzy/setup.bash
-# The site ROS 2 packages (joint servo + gello relay) are built on the robot
-# host and bind-mounted in; source the overlay when it is present.
+if [[ -f /opt/ebim-drivers/install/setup.bash ]]; then
+  source /opt/ebim-drivers/install/setup.bash
+fi
+# The image builds its own servo/model and Spine message overlay.
 if [[ -f /app/site/install/setup.bash ]]; then
   source /app/site/install/setup.bash
 fi
@@ -30,9 +36,24 @@ OUT="${TABLE_MISSION_OUTPUT_DIR:-/app/outputs}"
 mkdir -p "${OUT}/log"
 
 mode="${1:-mission}"
-[[ $# -gt 0 ]] && shift || true
+if [[ $# -gt 0 ]]; then shift; fi
 
 case "${mode}" in
+  hardware)
+    # Freeze this container's profile so editing host YAML cannot change the
+    # addresses/devices used by an already-running mission or shutdown.
+    if [[ -n "${EBIM_HARDWARE:-}" ]]; then
+      if [[ ! -f /run/ebim/hardware.yaml ]]; then
+        mkdir -p /run/ebim
+        cp "${EBIM_CALIBRATION}" /run/ebim/calibration.json
+        cp "${EBIM_HARDWARE}" /run/ebim/hardware.yaml
+      fi
+      export EBIM_HARDWARE=/run/ebim/hardware.yaml
+      export EBIM_CALIBRATION=/run/ebim/calibration.json
+    fi
+    export EBIM_CONTAINER_RUNTIME=1
+    exec "${PY}" /app/scripts/hardware.py "$@"
+    ;;
   mission)
     # Asset paths are passed explicitly so the arm-local stages the mission
     # spawns resolve them inside the image rather than in a source checkout.
@@ -76,16 +97,25 @@ case "${mode}" in
   selftest)
     exec "${PY}" -m pytest /app/tests -q "$@"
     ;;
+  model-check)
+    exec /usr/bin/python3 -m franka_duo_joint_servo.check_model "$@"
+    ;;
+  servo)
+    exec ros2 launch franka_duo_joint_servo joint_servo.launch.py "$@"
+    ;;
+  relay)
+    exec ros2 launch franka_duo_joint_servo gello_target_relay.launch.py "$@"
+    ;;
   shell)
     exec /bin/bash "$@"
     ;;
   --help | -h | help)
-    sed -n '3,11p' "$0"
+    sed -n '3,14p' "$0"
     exit 0
     ;;
   *)
     echo "unknown mode: ${mode}" >&2
-    sed -n '3,11p' "$0" >&2
+    sed -n '3,14p' "$0" >&2
     exit 2
     ;;
 esac

@@ -1,0 +1,22 @@
+[workspace]
+name = "ebim-cup-bowl"
+version = "1.0.0"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64"]
+
+[dependencies]
+python = ">=3.11,<3.13"
+pyyaml = ">=6,<7"
+pytest = ">=8,<9"
+numpy = ">=1.23.5,<2.3"
+
+[tasks]
+plan = "python scripts/hardware.py plan"
+check = "bash scripts/docker_hardware.sh check"
+up = "bash scripts/docker_hardware.sh up"
+status = "bash scripts/docker_hardware.sh status"
+logs = "bash scripts/docker_hardware.sh logs"
+down = "bash scripts/docker_hardware.sh down"
+mission = "bash scripts/docker_hardware.sh mission"
+run = "bash scripts/docker_hardware.sh run"
+test-hardware = { cmd = "python -m pytest tests/test_hardware.py tests/test_table_mission.py -q", env = { PYTHONPATH = "src" } }

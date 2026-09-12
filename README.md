@@ -32,8 +32,36 @@ arms**. The pipeline therefore raises the spine to 0.700 m before every drive
 and lowers it to 0.468 m on arrival.
 
 Control rates: the policy publishes 20-D action chunks at `30 Hz x
-playback_speed` (default `0.1`, i.e. 3 Hz). The 1 kHz joint tracking and
-impedance loops run in host-side ROS 2 nodes, not in this container.
+playback_speed` (default `0.1`, i.e. 3 Hz). The hardware startup workflow runs
+the 1 kHz joint tracker, impedance controllers and arm drivers in the same
+container on the arm host.
+
+### Hardware-configured startup
+
+The new [hardware startup workflow](docs/HARDWARE_STARTUP.md) uses
+[`hardware.yaml`](hardware.yaml) and Pixi tasks:
+
+Run these commands directly on the target `.100` arm host. Arm-side operations
+execute locally; SSH is used only to reach the separate `.50` base host.
+
+```bash
+pixi run plan
+pixi run check
+pixi run up --activate
+pixi run mission --execute
+```
+
+This deploys the bundled base routes and Python navigation adapters into an
+independent versioned directory, so the base no longer needs a pre-existing
+`~/tmr_cycle` or compiled `~/tmr_navigation` for this workflow. Native vendor
+drivers are required only on `.50`; `.100` needs Docker, hardware access and
+the completed image, with no host ROS workspace. `up --activate`
+enables impedance control after measured-position alignment; mission execution
+is separate. Existing unmanaged drivers are reported as conflicts. The manual
+bring-up instructions below remain available as a legacy deployment path.
+Without Pixi use `bash scripts/docker_hardware.sh <command>`. For startup plus
+the physical mission use `pixi run run --execute`; stop with `pixi run down`.
+The image build and physical validation are still pending.
 
 ### Cell assumptions
 
@@ -62,14 +90,13 @@ impedance loops run in host-side ROS 2 nodes, not in this container.
 
 ---
 
-## 2. Software prerequisites on the host
+## 2. Software inventory and legacy host installation
 
-**Nothing below is present on a stock Franka Duo Mobile.** Every package this
-policy talks to — the arm controllers, the gripper manager, the navigation
-routes, the local navigation adapter, the joint servo — is our own code or a
-vendor package carrying our modifications, and all of it is shipped in this
-repository. Section 2.1 lists what to deploy where; Section 4 gives the
-bring-up order.
+The default hardware workflow builds the arm software into the image and
+deploys the bundled base routes automatically. The inventory in Section 2.1
+and manual commands in Sections 3–4 describe the legacy native installation;
+they are not additional setup steps for the container workflow. Current host
+requirements and commands are in [Hardware startup](docs/HARDWARE_STARTUP.md).
 
 ### 2.1 What is ours, and where it goes
 
@@ -85,8 +112,9 @@ bring-up order.
 | `hosts/base/home/` | base host `~/` | `start_tmr_sensors.sh`, `zed_override.yaml`, `zed_relaunch.sh`, `cyclonedds.xml`. |
 | `hosts/base/vendor_patches/` | apply to vendor checkouts on the base host | Two small diffs against upstream: `franka_bringup/config/tmr.config.yaml` (`use_rviz: false`) and `zed-ros2-wrapper` configs (30 Hz publish, `depth_mode: NONE`). |
 
-Upstream vendor packages the above build against (not shipped; clone at the
-listed revisions):
+Upstream vendor packages used by the legacy installation are listed below.
+The current image fetches the arm dependencies at the exact revisions in
+`docker/drivers.lock.json` during build and retains their sources/licenses.
 
 | Package | Host | Origin | Revision |
 | --- | --- | --- | --- |
@@ -100,19 +128,29 @@ listed revisions):
 
 ### 2.2 Runtime requirements
 
-The container carries the policy and its Python dependencies. It does **not**
-carry robot drivers; those must already run on the host, because the policy is
-a ROS 2 participant talking to them.
+The container carries the policy, Python dependencies, Franka/Robotiq drivers,
+custom impedance controllers, Spine server, joint servo and relay. The default
+hardware workflow starts them locally in this container. Base/camera drivers
+remain native on `.50`.
+
+The image also builds the joint servo, relay and Spine message interfaces.
+The servo loads the exported default Duo model from `.100`, including both
+KDL configurations and all referenced meshes. It no longer needs the host's
+`franka_mobile_fr3_duo_moveit_config` package or a `site/install` bind mount.
+MoveIt/KDL/Ruckig run where the servo runs: inside the image when using its
+`servo` mode, or installed on the host when using the existing host servo.
+The default `mission` mode still expects a running servo/relay and active
+impedance controllers; use the hardware workflow to start the complete stack.
+See [bundled model provenance and validation](site/franka_duo_joint_servo/MODEL.md).
 
 | Requirement | Notes |
 | --- | --- |
-| ROS 2 **Jazzy** on the arm host | Image is `ros:jazzy-ros-base`; RMW must match |
-| `rmw_cyclonedds_cpp` | Default in the image; set `RMW_IMPLEMENTATION` to match the host |
-| Franka FR3 arm drivers | `franka_fr3_arm_controllers`, one per arm namespace |
-| `JointImpedanceController` | Site controller consuming `/{left,right}/gello/joint_states` |
-| Robotiq gripper drivers | Publishing `/{left,right}/gripper/joint_states` |
-| ZED wrapper | Publishing rectified head RGB + `camera_info` |
-| `franka_spine_server` | Provides `/franka_spine_node/*` services and action |
+| ROS 2 **Jazzy**, CycloneDDS | Installed inside the image |
+| Franka FR3 arm drivers | Built inside the image, one per arm namespace |
+| `JointImpedanceController` | Built inside the image; consumes `/{left,right}/gello/joint_states` |
+| Robotiq gripper drivers | Built inside the image; serial paths come from YAML |
+| ZED wrapper and SDK | Required on `.50`; native rectified RGB + `camera_info`, no image HTTP server |
+| `franka_spine_server` | Built inside the image; `/franka_spine_node/*` services and action |
 | ROS 2 **Humble** on the base host | Navigation stack, separate DDS domain |
 | Docker | With `--network host`; **no GPU runtime** |
 
@@ -196,7 +234,10 @@ saved START capture is needed.
 
 ---
 
-## 4. Bring-up order
+## 4. Legacy native bring-up order
+
+Skip this section when using `scripts/docker_hardware.sh` / Pixi. Do not run
+these drivers alongside the managed container.
 
 ### Base host
 
@@ -267,18 +308,17 @@ docker build -t franka-duo-table-mission:phase2 .
 # Offline self-check: no robot, no network.
 docker run --rm franka-duo-table-mission:phase2 selftest
 
+# Offline model check: both arms' FK/IK, no robot connection or commands.
+docker run --rm franka-duo-table-mission:phase2 model-check
+
 # Dry run: prints the 12-step plan, starts nothing.
 docker run --rm --network host franka-duo-table-mission:phase2 mission \
   --base-host <user>@<base-host> --base-root <base-routes-path>
 
-# Full mission. Drives the base and both arms.
-docker run --rm --network host \
-  -v ~/.ssh:/root/.ssh:ro \
-  -v "$PWD/site/install:/app/site/install:ro" \
-  -v "$PWD/outputs:/app/outputs" \
-  franka-duo-table-mission:phase2 mission \
-    --base-host <user>@<base-host> --base-root <base-routes-path> \
-    --speed 0.1 --execute
+# Full managed runtime and mission; hardware.yaml supplies all addresses.
+bash scripts/docker_hardware.sh run --execute
+# After the mission, target streams continue until an orderly shutdown:
+bash scripts/docker_hardware.sh down
 ```
 
 `--speed` **must** equal the servo `playback_speed`; the policy checks this and
@@ -292,7 +332,7 @@ refuses to publish otherwise. If your ROS domain or RMW differ, pass
 docker run --rm --network host franka-duo-table-mission:phase2 spine --target-m 0.468 --execute
 
 # Stow the arms only.
-docker run --rm --network host -v "$PWD/site/install:/app/site/install:ro" \
+docker run --rm --network host \
   franka-duo-table-mission:phase2 grasp --pose-only travel_stow --publish --enable-robot
 
 # Perception only from a saved frame; never moves the robot.
@@ -301,7 +341,6 @@ docker run --rm -v "$PWD/frame.jpg:/frame.jpg:ro" \
 
 # Grasp both objects and hold; skip every placement leg.
 docker run --rm --network host -v ~/.ssh:/root/.ssh:ro \
-  -v "$PWD/site/install:/app/site/install:ro" \
   franka-duo-table-mission:phase2 mission \
     --base-host <user>@<base-host> --base-root <base-routes-path> \
     --stop-after-grasp --execute

@@ -6,12 +6,12 @@ import unittest
 import yaml
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class TmrControllerLimitContracts(unittest.TestCase):
     def test_route_acceleration_stays_below_installed_tmr_limit(self) -> None:
-        config = yaml.safe_load((ROOT / "base" / "config" / "route.yaml").read_text())
+        config = yaml.safe_load((ROOT / "config" / "route.yaml").read_text())
         self.assertLessEqual(config["bootstrap_mapping"]["max_angular_accel"], 0.30)
 
     def test_active_route_helpers_use_the_same_angular_ramp(self) -> None:
@@ -26,7 +26,7 @@ class TmrControllerLimitContracts(unittest.TestCase):
             "14_letter_guided_search.py",
         ]
         for name in scripts:
-            source = (ROOT / "base" / "scripts" / name).read_text(encoding="utf-8")
+            source = (ROOT / "scripts" / name).read_text(encoding="utf-8")
             self.assertIn("0.28", source, name)
 
 

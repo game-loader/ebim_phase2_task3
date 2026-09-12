@@ -9,8 +9,8 @@ import cv2
 import numpy as np
 
 
-ROOT = Path(__file__).resolve().parents[2]
-SCRIPTS = ROOT / "base" / "scripts"
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "scripts"
 SEARCH_SOURCE = (SCRIPTS / "14_letter_guided_search.py").read_text(encoding="utf-8")
 RUNNER_SOURCE = (SCRIPTS / "14_run_letter_guided_search.sh").read_text(encoding="utf-8")
 EXPORT_SOURCE = (SCRIPTS / "zed_frame_export.py").read_text(encoding="utf-8")
@@ -70,14 +70,14 @@ class LetterVisionContracts(unittest.TestCase):
         found = vision.LetterCardRecognizer("ABD", minimum_confidence=0.20).detect(image)
         self.assertEqual({item.letter for item in found}, {"A", "B", "D"})
 
-    def test_same_letter_cards_use_group_midpoint(self) -> None:
+    def test_same_letter_cards_cannot_create_a_fictitious_center(self) -> None:
         tracker = search.TargetTracker("E", "far", stable_frames=3)
         observation = tracker.observe(
             [detection("E", 0.35, "far"), detection("E", 0.65, "far")], 0.7
         )
         self.assertIsNotNone(observation)
-        self.assertAlmostEqual(observation.center_x_norm, 0.5)
-        self.assertEqual(observation.members, 2)
+        self.assertIn(observation.center_x_norm, (0.35, 0.65))
+        self.assertEqual(observation.members, 1)
 
     def test_center_requires_repeated_low_spread_observations(self) -> None:
         tracker = search.TargetTracker("B", "auto", stable_frames=3)
@@ -115,7 +115,7 @@ class LetterVisionContracts(unittest.TestCase):
         )
         self.assertEqual(policy.image_gain_per_m, learned)
 
-    def test_center_crossing_stops_then_accepts_a_credible_single_frame(self) -> None:
+    def test_center_crossing_waits_for_repeated_observation(self) -> None:
         hold = search.CenterHold(0.055, single_frame_hold_s=0.30)
         holding, centered, _, _ = hold.update(
             search.TargetObservation(1.76, 0.483, "near", 0.36, 1), 10.0
@@ -124,8 +124,13 @@ class LetterVisionContracts(unittest.TestCase):
         self.assertFalse(centered)
         holding, centered, error, _ = hold.status(10.31)
         self.assertTrue(holding)
-        self.assertTrue(centered)
+        self.assertFalse(centered)
         self.assertAlmostEqual(error, -0.017)
+        holding, centered, _, _ = hold.update(
+            search.TargetObservation(1.76, 0.485, "near", 0.36, 1), 10.32
+        )
+        self.assertTrue(holding)
+        self.assertTrue(centered)
 
     def test_center_hold_rejects_a_low_confidence_single_frame(self) -> None:
         hold = search.CenterHold(0.055, single_frame_hold_s=0.30)

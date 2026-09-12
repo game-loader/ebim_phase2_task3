@@ -150,6 +150,7 @@ class MissionConfig:
     stage_poses: str = "configs/grasp_stage_poses.json"
     weights: str = "outputs/zed_pnp/yolo11n-seg.pt"
     output_dir: str = "outputs"
+    base_env: str = ""
 
 
 def emit(event: str, **values) -> None:
@@ -365,7 +366,7 @@ def build_remote_base_shell(config: MissionConfig, run_id: str, mission: str | N
         [
             # ROS setup files probe unset variables; enable nounset after them.
             "set -eo pipefail",
-            _base_environment(),
+            f"source {shlex.quote(config.base_env)}" if config.base_env else _base_environment(),
             "set -u",
             f"cd {root}",
             "command -v flock >/dev/null 2>&1 || { echo 'base lock utility unavailable' >&2; exit 72; }",
@@ -883,6 +884,7 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--base-host", default="tmr-user@172.16.0.50")
     parser.add_argument("--base-root", default="/home/tmr-user/tmr_cycle")
+    parser.add_argument("--base-env", default="", help="deployed base environment file; empty uses legacy host workspaces")
     parser.add_argument("--arm-root", type=Path, default=Path.cwd())
     parser.add_argument("--arm-env", default=str(Path.home() / "tmr_env.sh"))
     parser.add_argument("--dataset", default="datasets/franka_duo_lerobot_rgb20d_v1")
@@ -946,6 +948,7 @@ def main(argv=None) -> int:
     config = MissionConfig(
         base_host=args.base_host,
         base_root=args.base_root,
+        base_env=args.base_env,
         arm_root=str(args.arm_root.resolve()),
         arm_env=args.arm_env,
         dataset=args.dataset,

@@ -5,8 +5,9 @@ requires gello_target_relay.launch.py enable_robot:=true and an active
 joint_impedance_controller on each arm.
 """
 
-from franka_mobile_fr3_duo_moveit_config.description import get_robot_descriptions
-from franka_mobile_fr3_duo_moveit_config.parameters import get_parameters
+from pathlib import Path
+
+from franka_duo_joint_servo.model import default_model_directory, load_model_parameters
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
@@ -15,14 +16,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def _launch_node(context):
-    robot_description, robot_description_semantic = get_robot_descriptions("mobile_fr3_duo_v0_2", "false")
-    kinematics, joint_limits, _, _ = get_parameters()
-    moveit_parameters = {
-        "robot_description": robot_description,
-        "robot_description_semantic": robot_description_semantic,
-        "robot_description_kinematics": kinematics,
-        "robot_description_planning": joint_limits,
-    }
+    moveit_parameters = load_model_parameters(Path(LaunchConfiguration("model_directory").perform(context)))
 
     def number(name):
         return ParameterValue(LaunchConfiguration(name), value_type=float)
@@ -65,6 +59,7 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription(
         [
             SetEnvironmentVariable(name="RMW_IMPLEMENTATION", value="rmw_cyclonedds_cpp"),
+            DeclareLaunchArgument("model_directory", default_value=str(default_model_directory())),
             DeclareLaunchArgument("action_frame", default_value="link0"),
             DeclareLaunchArgument("tool_offset_z_m", default_value="0.174"),
             DeclareLaunchArgument("playback_speed", default_value="0.1"),

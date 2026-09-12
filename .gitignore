@@ -6,6 +6,7 @@ log/
 
 # Python and tooling
 .venv/
+.pixi/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -45,3 +46,4 @@ hosts/arm/teleoperation_overlay/log/
 
 # Ultralytics runtime state
 .ultralytics/
+.repo_memory/

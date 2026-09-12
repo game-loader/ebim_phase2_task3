@@ -1,0 +1,14 @@
+.git
+.repo_memory
+.pytest_cache
+.ruff_cache
+.venv
+.pixi
+**/__pycache__
+**/.DS_Store
+tmr_franka_task2_grasp
+outputs
+log
+site/build
+site/install
+site/log

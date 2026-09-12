@@ -4,8 +4,8 @@ from pathlib import Path
 import unittest
 
 
-ROOT = Path(__file__).resolve().parents[2]
-SOURCE = (ROOT / "base" / "scripts" / "18_start_zed_stream.sh").read_text(encoding="utf-8")
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE = (ROOT / "scripts" / "18_start_zed_stream.sh").read_text(encoding="utf-8")
 
 
 class ZedStreamContracts(unittest.TestCase):
@@ -15,9 +15,10 @@ class ZedStreamContracts(unittest.TestCase):
         self.assertIn('serial_number:=17064700', SOURCE)
         self.assertIn('flock -n 9', SOURCE)
 
-    def test_frame_bridge_is_atomic_exporter_plus_http(self) -> None:
+    def test_frame_export_stays_local(self) -> None:
         self.assertIn('zed_frame_export.py', SOURCE)
-        self.assertIn('python3 -m http.server 18082', SOURCE)
+        self.assertNotIn('http.server', SOURCE)
+        self.assertNotIn('18082', SOURCE)
         self.assertIn('rm -f "${frame_file}"', SOURCE)
 
 

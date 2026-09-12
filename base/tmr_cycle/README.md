@@ -199,6 +199,11 @@ python3 ~/tmr_cycle/scripts/capture_pose.py ~/tmr_cycle/config/route.yaml inspec
 控制域中读取该文件，因此不会在控制 DDS 域订阅高带宽压缩图像。ZED 冷启动
 最多等待 65 秒，避免旧版 10 秒窗口造成误判离线。
 
+`18_start_zed_stream.sh` 仅启动 ZED 和本地 JPEG 导出器，不提供 HTTP 服务。
+本地 JPEG 用于上述可选字母搜索。杯碗抓取直接订阅 ZED 的原生 ROS 2
+`Image` 和 `CameraInfo` topic，无需 JPEG 文件或 HTTP 服务；其相机 topic
+必须对抓取进程所在的 DDS 域可见。
+
 正常比赛仍通过 `cmd_vel_adapter` 独占发布。`--direct-controller` 仅用于适配器
 故障恢复；使用前必须停止适配器，确保 `swerve_drive_controller/cmd_vel` 只有
 一个发布者。底盘 bring-up 若自动启动 `teleop_twist_joy_node`，自主门框流程会
