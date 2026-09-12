@@ -282,9 +282,14 @@ Build and verification logs are in
 This recorded image predates the source directory rename to `base/tmr_base`.
 Rebuild the image to include the renamed directory and updated startup paths.
 
-The ARM64 base image has **not yet been built**. Its build-time checks and
-Jetson GPU/USB access remain unverified. Neither host's hardware drivers were
-started, and DDS communication, real-time control and physical operation still
-require hardware validation. Existing host installations and image tags were
-preserved; only the isolated build directory, build cache and new image tags
-were added on `.100`.
+The ARM64 base image was built on `.50` from commit `db0f066` as
+`franka-duo-base:db0f066` (image ID
+`sha256:62264216929c4858b1e48359909ea2a939adc1fbafa21dc5aae9ef3cedc0d47a`,
+12.54 GB). The build passed the package/asset checks and 130 base tests. An
+offline container probe loaded the Franka, mobile, ZED, SICK, controller-manager
+and SLAM libraries and detected one CUDA device. A synthetic CycloneDDS probe
+between this image on `.50` and the existing arm image on `.100` transferred
+228 acknowledged 640x360 RGB frames with matching CameraInfo. The probe emitted
+Fast DDS string deserialization warnings, so production QoS and physical
+operation still require hardware validation. No hardware nodes or motion were
+started; the ZED camera, radar and arms remain untested in this validation.
