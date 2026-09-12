@@ -1,0 +1,8 @@
+{
+  "franka_ros2": {"url": "https://github.com/frankarobotics/franka_ros2.git", "commit": "100603637134b79c1382a1dadb84ca87e7ed32c6"},
+  "franka_description": {"url": "https://github.com/frankarobotics/franka_description.git", "commit": "02afaae282d4a8e10d7d2f781b23b3515c303ce5"},
+  "libfranka": {"url": "https://github.com/frankarobotics/libfranka.git", "commit": "95b406f47c97cedfbe426c04d8fb7f83a9885e1c"},
+  "olvx_descriptions_module": {"url": "https://github.com/olive-robotics/olvx_descriptions_module.git", "commit": "c3444ed7742305ecda813433371ee2113abc7a44"},
+  "sick_safetyscanners2": {"url": "https://github.com/SICKAG/sick_safetyscanners2.git", "commit": "886a81af4bed1492e36033aa19338ef772155c2c"},
+  "zed_ros2_wrapper": {"url": "https://github.com/stereolabs/zed-ros2-wrapper.git", "commit": "458c72514c08856b2e911c011283eda2dae3b915"}
+}

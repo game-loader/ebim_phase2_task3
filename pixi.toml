@@ -19,4 +19,4 @@ logs = "bash scripts/docker_hardware.sh logs"
 down = "bash scripts/docker_hardware.sh down"
 mission = "bash scripts/docker_hardware.sh mission"
 run = "bash scripts/docker_hardware.sh run"
-test-hardware = { cmd = "python -m pytest tests/test_hardware.py tests/test_table_mission.py -q", env = { PYTHONPATH = "src" } }
+test-hardware = { cmd = "python -m pytest tests/test_hardware.py tests/test_base_container.py tests/test_table_mission.py -q", env = { PYTHONPATH = "src" } }

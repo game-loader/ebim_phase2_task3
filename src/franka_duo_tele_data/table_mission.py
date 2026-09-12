@@ -151,6 +151,8 @@ class MissionConfig:
     weights: str = "outputs/zed_pnp/yolo11n-seg.pt"
     output_dir: str = "outputs"
     base_env: str = ""
+    base_container: str = ""
+    base_release: str = ""
 
 
 def emit(event: str, **values) -> None:
@@ -397,6 +399,13 @@ def build_remote_base_shell(config: MissionConfig, run_id: str, mission: str | N
 
 
 def build_base_argv(config: MissionConfig, run_id: str, mission: str | None = None) -> list[str]:
+    if config.base_container:
+        if not config.base_release:
+            raise ValueError("base container routes require a release identifier")
+        return [sys.executable, str(Path(__file__).resolve().parents[2] / "scripts/hardware/base_route_client.py"),
+                config.base_host, config.base_container, config.base_release,
+                build_remote_base_shell(config, run_id, mission)]
+    remote = "bash -lc " + shlex.quote(build_remote_base_shell(config, run_id, mission))
     return [
         "ssh",
         "-o",
@@ -408,7 +417,7 @@ def build_base_argv(config: MissionConfig, run_id: str, mission: str | None = No
         "-o",
         "ServerAliveCountMax=3",
         config.base_host,
-        "bash -lc " + shlex.quote(build_remote_base_shell(config, run_id, mission)),
+        remote,
     ]
 
 
@@ -885,6 +894,8 @@ def main(argv=None) -> int:
     parser.add_argument("--base-host", default="tmr-user@172.16.0.50")
     parser.add_argument("--base-root", default="/home/tmr-user/tmr_cycle")
     parser.add_argument("--base-env", default="", help="deployed base environment file; empty uses legacy host workspaces")
+    parser.add_argument("--base-container", default="", help="base Docker container name")
+    parser.add_argument("--base-release", default="", help="base runtime release identifier")
     parser.add_argument("--arm-root", type=Path, default=Path.cwd())
     parser.add_argument("--arm-env", default=str(Path.home() / "tmr_env.sh"))
     parser.add_argument("--dataset", default="datasets/franka_duo_lerobot_rgb20d_v1")
@@ -949,6 +960,8 @@ def main(argv=None) -> int:
         base_host=args.base_host,
         base_root=args.base_root,
         base_env=args.base_env,
+        base_container=args.base_container,
+        base_release=args.base_release,
         arm_root=str(args.arm_root.resolve()),
         arm_env=args.arm_env,
         dataset=args.dataset,

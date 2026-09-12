@@ -4,13 +4,25 @@ This repository contains code adapted from the following project:
 
 - **Franka ROS 2 drivers, descriptions, Spine interfaces/server and libfranka**.
   Docker downloads the exact revisions listed in `docker/drivers.lock.json`
-  and retains their source trees and license files in `/opt/ebim-vendor-src`.
+  and `docker/base_drivers.lock.json`. Source trees and license files remain in
+  `/opt/ebim-vendor-src` (arm) and `/opt/ebim-base-vendor-src` (base).
   Franka ROS 2 and descriptions are Apache 2.0; libfranka is Apache 2.0 and
   retains its bundled dependency notices. Franka ROS 2 also includes
   `realtime_tools` (BSD 3-Clause).
 - **PickNik ROS 2 Robotiq gripper** (BSD 3-Clause) and **serial** by William
   Woodall and contributors (MIT), pinned in the same lock file. Full sources
   and notices are retained in `/opt/ebim-vendor-src` in the image.
+
+- **SICK safetyscanners ROS 2 driver** (Apache 2.0), **Stereolabs ZED ROS 2
+  wrapper** (Apache 2.0), and **Olive Robotics module descriptions** (MIT).
+  Exact source revisions are in `docker/base_drivers.lock.json`, with sources
+  and licenses retained in `/opt/ebim-base-vendor-src` in the base image.
+- **Stereolabs ZED SDK** and **NVIDIA CUDA** are provided by the official
+  `stereolabs/zed:5.1.2-devel-l4t-r36.4` base image pinned by digest in
+  `docker/base.Dockerfile`. These proprietary components retain their vendor
+  licenses; this repository's Apache 2.0 license does not relicense them.
+  See the SDK's included license and <https://www.stereolabs.com/developers/release/>
+  and <https://docs.nvidia.com/cuda/eula/> for vendor terms.
 
 - **Franka Robotics robot descriptions and Duo MoveIt configuration**, exported
   from the installed default model. Copyright Franka Robotics GmbH and

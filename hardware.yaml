@@ -7,13 +7,11 @@ hosts:
     # All arm software runs inside the image; only the base uses SSH.
     dds_address: 172.16.0.100
   base:
-    # Reached from the local arm host, using its existing SSH authentication.
+    # SSH runs Docker only; ROS, SDK and drivers live in the base image.
     ssh: tmr-user@172.16.0.50
-    runtime_root: /home/tmr-user/ebim_cup_bowl_runtime
-    ros_setup: /opt/ros/humble/setup.bash
-    overlays:
-      - /home/tmr-user/ros2_ws/install/setup.bash
     dds_address: 172.16.0.50
+    image: franka-duo-base:phase2
+    container: ebim-cup-bowl-base
 domains:
   arm: 0
   base: 97
@@ -42,6 +40,9 @@ camera:
   serial: 17064700
   # The existing policy calibration assumes this camera and mounting geometry.
   calibration: configs/zed_pnp_calibration.json
+  # Optional directory of per-camera SN<serial>.conf files on the base host.
+  # Only calibration data is read; the host ZED SDK is not used.
+  sdk_settings_dir: /usr/local/zed/settings
 runtime:
   playback_speed: 0.1
   ready_timeout_s: 120

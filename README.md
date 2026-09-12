@@ -24,7 +24,7 @@ against were recorded under it.
 | Spine | Prismatic `franka_spine_vertical_joint`, range `[0.0, 0.85] m` |
 | Head camera | ZED Mini, rectified RGB 640x360. **Depth is not used.** |
 | Wrist cameras | Not used |
-| GPU | **None required.** `yolo11n-seg` on CPU, ~15 ms/frame after warm-up |
+| GPU | Arm perception runs `yolo11n-seg` on CPU; ZED uses the base Jetson GPU through NVIDIA Container Runtime |
 
 Both arms are mounted on the spine carriage (`fr3_duo
 base_mount="franka_spine_mounting_point"`), so **moving the spine moves both
@@ -51,17 +51,18 @@ pixi run up --activate
 pixi run mission --execute
 ```
 
-This deploys the bundled base routes and Python navigation adapters into an
-independent versioned directory, so the base no longer needs a pre-existing
-`~/tmr_cycle` or compiled `~/tmr_navigation` for this workflow. Native vendor
-drivers are required only on `.50`; `.100` needs Docker, hardware access and
-the completed image, with no host ROS workspace. `up --activate`
+This starts two containers with host networking: the Jazzy arm runtime on
+`.100` and the Humble TMR/LiDAR/ZED/navigation runtime on `.50`. Bundled routes
+and adapters are deployed into the base container's persistent volume. Both
+hosts need their completed images and hardware access, with no host ROS
+workspace or ZED SDK dependency. `.50` additionally needs the matching Jetson
+system/NVIDIA Docker runtime, SSH and Python 3 standard library. `up --activate`
 enables impedance control after measured-position alignment; mission execution
 is separate. Existing unmanaged drivers are reported as conflicts. The manual
 bring-up instructions below remain available as a legacy deployment path.
 Without Pixi use `bash scripts/docker_hardware.sh <command>`. For startup plus
 the physical mission use `pixi run run --execute`; stop with `pixi run down`.
-The image build and physical validation are still pending.
+Both image builds and physical validation are still pending.
 
 ### Cell assumptions
 
@@ -92,8 +93,8 @@ The image build and physical validation are still pending.
 
 ## 2. Software inventory and legacy host installation
 
-The default hardware workflow builds the arm software into the image and
-deploys the bundled base routes automatically. The inventory in Section 2.1
+The default hardware workflow packages both machines' software in separate
+images and deploys the bundled base routes automatically. The inventory in Section 2.1
 and manual commands in Sections 3–4 describe the legacy native installation;
 they are not additional setup steps for the container workflow. Current host
 requirements and commands are in [Hardware startup](docs/HARDWARE_STARTUP.md).
@@ -113,8 +114,9 @@ requirements and commands are in [Hardware startup](docs/HARDWARE_STARTUP.md).
 | `hosts/base/vendor_patches/` | apply to vendor checkouts on the base host | Two small diffs against upstream: `franka_bringup/config/tmr.config.yaml` (`use_rviz: false`) and `zed-ros2-wrapper` configs (30 Hz publish, `depth_mode: NONE`). |
 
 Upstream vendor packages used by the legacy installation are listed below.
-The current image fetches the arm dependencies at the exact revisions in
-`docker/drivers.lock.json` during build and retains their sources/licenses.
+The images fetch dependencies at the exact revisions in
+`docker/drivers.lock.json` (arm) and `docker/base_drivers.lock.json` (base)
+during build and retain their sources/licenses.
 
 | Package | Host | Origin | Revision |
 | --- | --- | --- | --- |
@@ -128,10 +130,10 @@ The current image fetches the arm dependencies at the exact revisions in
 
 ### 2.2 Runtime requirements
 
-The container carries the policy, Python dependencies, Franka/Robotiq drivers,
+The arm container carries the policy, Python dependencies, Franka/Robotiq drivers,
 custom impedance controllers, Spine server, joint servo and relay. The default
-hardware workflow starts them locally in this container. Base/camera drivers
-remain native on `.50`.
+hardware workflow starts them locally in this container. The base image carries
+Humble, TMR/swerve drivers, SICK, ZED SDK/wrapper, SLAM and navigation adapters.
 
 The image also builds the joint servo, relay and Spine message interfaces.
 The servo loads the exported default Duo model from `.100`, including both
@@ -149,14 +151,15 @@ See [bundled model provenance and validation](site/franka_duo_joint_servo/MODEL.
 | Franka FR3 arm drivers | Built inside the image, one per arm namespace |
 | `JointImpedanceController` | Built inside the image; consumes `/{left,right}/gello/joint_states` |
 | Robotiq gripper drivers | Built inside the image; serial paths come from YAML |
-| ZED wrapper and SDK | Required on `.50`; native rectified RGB + `camera_info`, no image HTTP server |
+| ZED wrapper and SDK | Inside the base image; ROS rectified RGB + `camera_info`, no image HTTP server |
 | `franka_spine_server` | Built inside the image; `/franka_spine_node/*` services and action |
-| ROS 2 **Humble** on the base host | Navigation stack, separate DDS domain |
-| Docker | With `--network host`; **no GPU runtime** |
+| ROS 2 **Humble** | Inside the base image; navigation uses a separate DDS domain |
+| Docker | Both images use `--network host`; `.50` uses NVIDIA runtime for ZED |
 
 **Network at run time:** no internet needed. Weights, extrinsics and the action
 contract are baked into the image. The container does need **host networking**
-for DDS and SSH to the base host.
+for DDS and SSH to the base host. Preload both images, SSH credentials and the
+matching ZED factory calibration before offline deployment.
 
 ### Required ROS 2 interfaces
 
@@ -195,14 +198,20 @@ Topic names are configurable in `configs/tmr_rgb20d.yaml`.
 ## 3. Two-host layout
 
 ```
- ARM HOST (ROS 2 Jazzy, domain 0)        BASE HOST (ROS 2 Humble, domain 97)
- this container                  --ssh->  navigation routes
- perception, spine, arms                  swerve controller, LiDAR, SLAM
+ ARM HOST .100                        BASE HOST .50 (Jetson)
+ Jazzy container                 --ssh-> Docker / Humble container
+ perception, spine, arms                  routes, swerve, LiDAR, SLAM (domain 97)
+ domain 0                       <--DDS-- ZED image + camera_info (domain 0)
 ```
 
-The two ROS graphs are **never merged**. The base is driven over SSH and judged
-only by the structured JSON report each route prints. Every base leg takes the
-same `flock`, so two routes can never own the velocity channel at once.
+The arm and base-control ROS domains stay separate. ZED publishes in the arm
+domain, while navigation runs in the base domain. Routes run through SSH and
+`docker exec` with connection heartbeats; each route returns a structured JSON
+report. Every base leg takes the same `flock`, so two routes cannot own the
+velocity channel at once. The default hardware workflow handles deployment
+and startup; no manual copying or host workspace build is needed.
+
+The following instructions describe the legacy native deployment only.
 
 Set `--base-host user@host` and `--base-root /path/to/base/routes` for the
 testbed. Passwordless SSH from the container to the base host is required:
@@ -302,8 +311,9 @@ bash scripts/reconnect_arm_state.sh both
 ## 5. Build and run
 
 ```bash
-# Build
-docker build -t franka-duo-table-mission:phase2 .
+# Build later on matching builders, then load each image on its target host.
+docker build --platform linux/amd64 -t franka-duo-table-mission:phase2 .
+docker build --platform linux/arm64 -f docker/base.Dockerfile -t franka-duo-base:phase2 .
 
 # Offline self-check: no robot, no network.
 docker run --rm franka-duo-table-mission:phase2 selftest
@@ -394,6 +404,8 @@ point; the base has driven elsewhere by then.
 | File | Purpose |
 | --- | --- |
 | `configs/tmr_rgb20d.yaml` | Topic names, workspace bounds, step limits, staleness |
+| `hardware.yaml` | Hardware IPs/serials, DDS domains and base container settings |
+| `configs/zed_sdk/` | Original ZED factory intrinsics; replacements need the matching serial file |
 | `configs/zed_pnp_calibration.json` | Head-camera extrinsics, solved at spine 0.468 m |
 | `configs/grasp_stage_poses.json` | Taught dual-arm postures |
 | `assets/contract/` | 20-D action contract metadata |
@@ -464,7 +476,7 @@ hosts/arm/env/, hosts/base/home/  env scripts and DDS configs for each host
 hosts/base/vendor_patches/  our two small diffs against upstream franka_ros2 / zed-ros2-wrapper
 scripts/                    operator bring-up scripts
 configs/, assets/           configuration, extrinsics, weights, contract
-tests/                      66 offline tests, no robot required
+tests/                      offline tests, no robot required
 docs/                       TABLE_MISSION.md, JOINT_SERVO_REPLAY.md, ZED_PNP_CALIBRATION.md
 ```
 

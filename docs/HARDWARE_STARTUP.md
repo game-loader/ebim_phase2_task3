@@ -3,9 +3,11 @@
 The `.100` arm machine runs one container with `--network host`: Franka drivers,
 custom impedance controllers, Robotiq drivers, Spine server, joint servo,
 relay, perception and mission. It needs no host ROS workspace, MoveIt install,
-SSH self-login or Docker socket mount. The `.50` base/camera machine remains
-separate and runs its native Humble drivers; the container reaches it over
-SSH and DDS. All arm motion still uses impedance control. MoveIt/KDL provide
+SSH self-login or Docker socket mount. The `.50` base/camera machine runs a
+second container with host networking: Humble, TMR/swerve drivers, SICK drivers,
+ZED SDK/wrapper, navigation adapters, SLAM and the bundled routes. The arm
+container manages it over SSH and receives camera data over DDS. All arm
+motion still uses impedance control. MoveIt/KDL provide
 the bundled model and IK inside the image; no `move_group` is started.
 
 ## Configure another unit
@@ -15,14 +17,23 @@ Edit `hardware.yaml` for the same TMR FR3v2 Duo hardware and mounting geometry:
 - Arm host DDS address, left/right arm IPs, Spine/base IPs.
 - Left/right gripper `/dev/serial/by-id/...` paths. The launcher reads these
   once and maps them to `/dev/ebim-left-gripper` and `/dev/ebim-right-gripper`.
-- Base SSH address, Humble setup/overlay paths and writable runtime directory.
+- Base SSH address, image reference and container name. Runtime paths are
+  supplied by the images; no host ROS setup/overlay paths are needed.
 - ZED Mini serial/calibration, scanner IPs and receiving interface IP.
 - DDS domains and playback speed (default `0.1`).
 
-Serial/IP changes do not cover changed mounting transforms, camera intrinsics,
-TCP, robot model or base kinematics. Recalibrate a replacement camera and
-validate the taught postures/routes for the physical cell. The default routes,
+This profile assumes the same hardware, mounting geometry and underlying
+system configuration as the inspected machines. Serial/IP changes do not
+cover changed mounting transforms, TCP, robot model or base kinematics.
+Validate camera extrinsics and taught postures/routes for the physical cell. The default routes,
 calibration, model, weights and taught poses are already in this submission.
+
+The base image includes the original ZED Mini's `SN17064700.conf` factory
+intrinsics. For another serial, put its matching `SN<serial>.conf` in a data
+directory on `.50` and set `camera.sdk_settings_dir` to it. This reads only
+calibration data, not a host SDK. Prepare the file before offline deployment;
+startup refuses a missing serial-specific calibration. Factory intrinsics
+are separate from `camera.calibration`, the policy's camera-to-robot extrinsics.
 
 Keep the calibration file at the path named in YAML (relative to the YAML
 directory, or absolute on the arm host). The launcher mounts the profile and
@@ -35,26 +46,41 @@ Stop the runtime before applying a changed profile.
 | Machine | Must already provide |
 | --- | --- |
 | `.100` arm | Linux Docker Engine with the completed image loaded; Bash; hardware network routes; USB serial devices; kernel/RT scheduling support suitable for Franka FCI; robot FCI enabled |
-| `.50` base/camera | ROS Humble and compatible TMR driver workspace, SICK drivers, SLAM Toolbox, TF2, rclpy, PyYAML, CycloneDDS, ZED wrapper and ZED SDK, SSH server |
+| `.50` base/camera | Jetson Orin ARM64, matching L4T R36.4 kernel/NVIDIA drivers, Docker Engine with NVIDIA runtime and base image loaded, Python 3 standard library, SSH server, USB/video devices, matching ZED factory calibration |
 | Both | Correct interface addresses and synchronized clocks |
 
-The container supplies SSH client software. Mount an SSH directory containing
+Read-only inspection confirmed `.50` uses Ubuntu **22.04.5**, L4T **R36.4.0**,
+CUDA **12.6**, ZED SDK **5.1.2**, and an already configured Docker `nvidia`
+runtime. The base image is pinned to the official matching Stereolabs image.
+The `.100` image uses Ubuntu 24.04 / ROS Jazzy; `.50` uses Ubuntu 22.04 / ROS
+Humble inside its image. Neither host needs ROS, MoveIt, Python ROS modules,
+vendor workspaces or a host ZED SDK installed for this workflow.
+
+The arm container supplies SSH client software. Mount an SSH directory containing
 a usable key and verified `known_hosts` entries for `.50`; encrypted keys need
 an authentication setup usable in the container (no agent forwarding is added).
 By default the launcher mounts `$HOME/.ssh` to `/root/.ssh` read-only; override
 with `EBIM_SSH_DIR=/absolute/path`. SSH config entries must use paths valid
-inside that mount. No credentials are stored in the image or hardware YAML.
+inside that mount. The `.50` SSH user must be able to run Docker without an
+interactive sudo prompt. No credentials are stored in the image or hardware YAML.
 
-Docker uses host networking, private IPC, `SYS_NICE`, `IPC_LOCK`, RT priority
-and unlimited memlock limits, plus the two explicit serial devices. It does
-not use `--privileged`, host PID namespace, GPU runtime or nested Docker.
+Both containers use host networking, private IPC, `SYS_NICE`, `IPC_LOCK`, RT
+priority and unlimited memlock limits. The arm container maps two explicit
+serial devices and needs no GPU. The base container uses the NVIDIA runtime,
+USB bus/video devices and read-only udev metadata for ZED. Neither uses
+`--privileged`, host PID namespace, a Docker socket mount or nested Docker.
 These options cannot supply a missing RT kernel or configure host networking.
 
 ## Commands on `.100`
 
-Load/build the image separately; no command below builds or pulls it. Default
-image: `franka-duo-table-mission:phase2`. If changed, set both `image` in YAML
-and `EBIM_IMAGE` to that reference.
+Load both images separately; no command below builds or pulls them. Default
+arm image: `franka-duo-table-mission:phase2`. If changed, set both `image` in
+YAML and `EBIM_IMAGE` to that reference. Default base image:
+`franka-duo-base:phase2`, configured in `hosts.base.image`.
+
+After image delivery, on `.100`: `docker load -i arm-image.tar`; on `.50`:
+`docker load -i base-image.tar`. Then configure `hardware.yaml` and SSH access.
+All routine startup commands below run locally on `.100`.
 
 ```bash
 # Validate profile/print plan without connecting to robot hosts.
@@ -89,12 +115,13 @@ pixi run down
 `plan`, `check`, `up` and `run` accept `--hardware /path/to/hardware.yaml`.
 `status`, `mission` and `down` use the running container's snapshot. The default
 container name is `ebim-cup-bowl-runtime`; `EBIM_CONTAINER` overrides it.
-The host requires no Python when using the Bash launcher: YAML is parsed by
+The arm host requires no Python when using the Bash launcher: YAML is parsed by
 a temporary network-isolated container from the same image.
 
 ## Startup, failures and shutdown
 
-`up` checks dependencies, deploys a versioned release, starts base/navigation
+`up` checks dependencies and the base image/platform, creates the base
+container, deploys a versioned release into its volume, starts base/navigation
 and camera, then arm/gripper/Spine drivers and servo/relay. It checks live state,
 image/intrinsics, map/TF and servers. Process checks and bounded DDS discovery
 reject existing unmanaged publishers/managers; they do not kill them. DDS
@@ -106,11 +133,19 @@ The servo has a 60-second idle-follow window. If `up` without activation
 exceeds it, use `down`, then `up --activate`. `up` refuses an existing runtime
 container instead of restarting active streams or silently changing config.
 
-The container remains alive after a mission finishes, a startup failure or a
+The containers remain alive after a mission finishes, a startup failure or a
 child process failure. Failed children are recorded and block new missions;
 they are not automatically restarted and robot faults are not reset. The
 supervisor checks process ownership/child failures, not continuous physical
 safety. Mission startup additionally checks live interfaces and robot state.
+
+Each route runs via SSH → `docker exec -i` → a container-side watchdog. The
+arm client sends heartbeats; EOF or a three-second heartbeat timeout stops
+the route process group with bounded SIGINT/TERM/KILL escalation. Nested route
+tasks inherit that group when supervised, including the return's door segment. The velocity
+adapter's existing command timeout also stops stale motion commands. The base
+orchestration lock prevents managed shutdown during a route; route completion
+does not shut down the driver container.
 
 `down` takes the orchestration lock, deactivates impedance on its managed arm
 drivers, confirms command controllers are inactive, then stops servo and
@@ -128,13 +163,15 @@ must be reconciled explicitly before managed startup.
 ## Deployment and logs
 
 Routes, navigation Python adapters, launch helpers, DDS profiles and calibration
-are deployed under `<runtime_root>/releases/<content-hash>/` on `.50`. Existing
+are deployed under `/app/runtime/releases/<content-hash>/` inside `.50`'s container. Existing
 vendor trees and shell startup files are not patched. No pre-existing
 `~/tmr_cycle` or compiled `~/tmr_navigation` is required. Arm runtime code is
 already in the image and its release/state lives in `/app/runtime`.
 
 Docker volumes `<container>-state` and `<container>-outputs` persist logs and
-mission checkpoints across container removal. Host process ownership includes
+mission checkpoints for the arm container. On `.50`, `<base-container>-state`
+persists deployed routes/state/logs and `<base-container>-zed-settings` persists
+SDK calibration. Both survive container removal. Process ownership includes
 boot ID, PID namespace and process start time, so old container PIDs cannot be
 reused as ownership evidence. A mission checkpoint intentionally prevents
 replaying a completed drive; follow the README's reset-between-rounds procedure.
@@ -144,6 +181,10 @@ bash scripts/docker_hardware.sh logs
 docker exec ebim-cup-bowl-runtime tail -n 100 /app/runtime/logs/arm.log
 docker exec ebim-cup-bowl-runtime tail -n 100 /app/runtime/logs/servo.log
 docker cp ebim-cup-bowl-runtime:/app/outputs ./mission-outputs
+# On .50:
+docker logs --tail 100 ebim-cup-bowl-base
+docker exec ebim-cup-bowl-base tail -n 100 /app/runtime/logs/base.log
+docker exec ebim-cup-bowl-base tail -n 100 /app/runtime/logs/camera.log
 ```
 
 ## Build and validation status
@@ -154,7 +195,25 @@ libraries, generated FR3v2/Robotiq URDFs, controller configuration, executable
 installation and FK/IK without starting hardware. Source/license copies are
 retained in `/opt/ebim-vendor-src`.
 
-The implementation has offline unit coverage. The complete image has **not yet
-been built**, so these build checks and driver ABI compatibility remain
-unverified. No deployment, hardware startup or target-host modification was
-performed while implementing this workflow.
+`docker/base_drivers.lock.json` pins the inspected Humble Franka, description,
+Olive, SICK and ZED wrapper revisions; their sources/licenses remain in
+`/opt/ebim-base-vendor-src`. `docker/base.Dockerfile` pins the ZED/CUDA base image
+by digest. ROS/system packages are installed from apt and are not individually
+version-locked. The build preserves the inspected swerve controller parameters,
+merging upstream duplicate YAML root mappings without changing their values.
+Its offline checks exercise the real TMR xacro, installed executables/libraries,
+SDK version and route tests. No hardware nodes are started during the build.
+
+Build commands, for a later authorized build on the corresponding architectures:
+
+```bash
+# AMD64 builder
+docker build --platform linux/amd64 -t franka-duo-table-mission:phase2 .
+# ARM64 builder; official Jetson SDK development base, no camera needed to build
+docker build --platform linux/arm64 -f docker/base.Dockerfile -t franka-duo-base:phase2 .
+```
+
+The implementation has offline unit coverage. Neither complete image has
+**yet been built**, so build-time checks, driver ABI compatibility, GPU/USB
+access and physical operation remain unverified. No deployment, hardware
+startup or target-host modification was performed during this implementation.

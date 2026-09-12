@@ -191,6 +191,10 @@ def test_actual_archive_deployment_is_versioned_and_repeatable(config, tmp_path)
         return subprocess.run([sys.executable, *args[1:]], input=payload, capture_output=True, check=True)
 
     orchestrator.execute = local_remote
+    def local_base_deploy(operation, payload):
+        assert operation == "deploy"
+        load_helper("deploy").deploy(tmp_path / "base", orchestrator.release, payload)
+    orchestrator.base_docker = local_base_deploy
     orchestrator.deploy()
     route = tmp_path / "base/releases" / orchestrator.release / "base/tmr_cycle/scripts/07_start_to_pickup.py"
     assert route.read_bytes() == (ROOT / "base/tmr_cycle/scripts/07_start_to_pickup.py").read_bytes()

@@ -14,7 +14,6 @@ from contextlib import contextmanager
 import importlib.util
 import json
 import math
-import os
 from pathlib import Path
 import signal
 import subprocess
@@ -22,6 +21,7 @@ import sys
 import time
 
 from far_leg_target import driver_session, read_config
+from route_process import spawn_route_child, signal_route_child
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -331,17 +331,17 @@ def run_legacy_return(path, state):
         "--state-file",
         str(child_state),
     ]
-    child = subprocess.Popen(command, start_new_session=True)
+    child = spawn_route_child(command)
     try:
         code = child.wait(timeout=150)
     except BaseException:
         if child.poll() is not None:
             raise
-        os.killpg(child.pid, signal.SIGINT)
+        signal_route_child(child, signal.SIGINT)
         try:
             child.wait(timeout=6)
         except subprocess.TimeoutExpired:
-            os.killpg(child.pid, signal.SIGTERM)
+            signal_route_child(child, signal.SIGTERM)
             child.wait(timeout=3)
         raise
     report = (

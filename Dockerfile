@@ -7,7 +7,7 @@
 # Build: docker build -t franka-duo-table-mission:phase2 .
 
 FROM ros:jazzy-ros-base
-LABEL io.ebim.hardware.schema="2"
+LABEL io.ebim.hardware.schema="3" io.ebim.role="arm"
 
 ARG UBUNTU_APT_MIRROR=
 ARG ROS_APT_MIRROR=

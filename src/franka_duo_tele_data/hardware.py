@@ -1,7 +1,7 @@
 """Hardware profile, reproducible deployment and two-host startup orchestration.
 
-This module is ROS-free. Arm commands run inside the image; base commands use
-the base host's system Python and ROS installation.
+This module is ROS-free. Arm commands run inside the Jazzy image; SSH manages
+the Humble base container. Neither host needs a native ROS workspace.
 """
 
 from __future__ import annotations
@@ -47,6 +47,17 @@ def load_hardware(path: Path, *, require_calibration=True) -> dict:
     arm.update(runtime_root="/app/runtime", ros_setup="/opt/ros/jazzy/setup.bash",
                overlays=["/opt/ebim-drivers/install/setup.bash", "/app/site/install/setup.bash"],
                ssh_directory="/root/.ssh")
+    base = config["hosts"]["base"]
+    if any(key in base for key in ("runtime_root", "ros_setup", "overlays")):
+        raise ValueError("base runtime paths are supplied by the image; remove legacy host workspace settings")
+    base.update(runtime_root="/app/runtime", ros_setup="/opt/ros/humble/setup.bash",
+                overlays=["/opt/ebim-base/install/setup.bash"])
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", base["container"]):
+        raise ValueError("invalid base container name")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./:@-]*", base["image"]):
+        raise ValueError("invalid base image reference")
+    if config["camera"].get("sdk_settings_dir"):
+        absolute_path(config["camera"]["sdk_settings_dir"])
     for role in ("arm", "base"):
         host = config["hosts"][role]
         if role == "arm" and "ssh" in host:
@@ -119,6 +130,8 @@ def bundle_files(config: dict) -> dict[str, bytes]:
     files["scripts/hardware/franka.launch.py"] = (ROOT / single_arm).read_bytes()
     files["hardware.json"] = json.dumps(config, sort_keys=True, indent=2).encode()
     files["calibration.json"] = Path(config["camera"]["calibration"]).read_bytes()
+    for name in ("drivers.lock.json", "base_drivers.lock.json"):
+        files["docker/" + name] = (ROOT / "docker" / name).read_bytes()
     for role in ("arm", "base"):
         files[f"dds_{role}.xml"] = dds_xml(config["hosts"][role]["dds_address"]).encode()
     files["base_robot.yaml"] = json.dumps({"ROBOT1": {
@@ -133,6 +146,7 @@ def bundle_files(config: dict) -> dict[str, bytes]:
     base = config["hosts"]["base"]
     files["base_env.sh"] = ("\n".join([
         "#!/usr/bin/env bash", "unset PYTHONPATH AMENT_PREFIX_PATH COLCON_PREFIX_PATH CMAKE_PREFIX_PATH LD_LIBRARY_PATH",
+        "export LD_LIBRARY_PATH=/opt/ebim-libfranka/lib:/usr/local/zed/lib:/usr/local/cuda/lib64",
         *[f"source {shlex.quote(p)}" for p in [base["ros_setup"], *base["overlays"]]],
         f"export ROS_DOMAIN_ID={config['domains']['base']}",
         "export ROS_LOCALHOST_ONLY=0 ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET RMW_IMPLEMENTATION=rmw_cyclonedds_cpp",
@@ -182,6 +196,8 @@ class Orchestrator:
         return result.stdout
 
     def host(self, role, operation, *, activate=False):
+        if role == "base":
+            return self.base_docker(operation)
         # Pass the stdlib-only helper directly so check/status need no deployment.
         source = self.files["scripts/hardware/host.py"].decode()
         args = ["/usr/bin/python3", "-B", "-c", source, operation, role,
@@ -190,9 +206,15 @@ class Orchestrator:
             args.append("--activate")
         return self.execute(role, args, timeout=None if operation.startswith("mission") else 420)
 
+    def base_docker(self, operation, payload=None):
+        source = self.files["scripts/hardware/base_docker.py"].decode()
+        timeout = 4 * (float(self.config["runtime"]["ready_timeout_s"]) + 90) + 120
+        return self.execute("base", ["/usr/bin/python3", "-B", "-c", source, operation,
+                                    json.dumps(self.config), self.release], payload=payload, timeout=timeout)
+
     def plan(self):
         print(json.dumps({"release": self.release, "profile": self.config["profile"],
-                          "execution": {"arm": "container-local", "base": "ssh"},
+                          "execution": {"arm": "container-local", "base": "ssh-to-container"},
                           "hosts": self.config["hosts"], "image": self.config["image"],
                           "components": {key: self.config[key]["mode"] for key in COMPONENTS},
                           "steps": ["check host dependencies and ownership", "deploy bundled routes and helpers",
@@ -202,7 +224,8 @@ class Orchestrator:
 
     def deploy(self):
         payload = archive(self.files)
-        for role in ("base", "arm"):
+        self.base_docker("deploy", payload)
+        for role in ("arm",):
             root = self.config["hosts"][role]["runtime_root"]
             # Extraction is into a new versioned directory, never the vendor workspace.
             code = """import io,os,sys,tarfile,tempfile

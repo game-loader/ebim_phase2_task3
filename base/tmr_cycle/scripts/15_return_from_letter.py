@@ -24,6 +24,8 @@ import sys
 import threading
 import time
 
+from route_process import spawn_route_child, signal_route_child
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG = SCRIPT_DIR.parent / "config" / "start_to_pickup.yaml"
@@ -110,7 +112,7 @@ def run_door_child(args: argparse.Namespace) -> tuple[int, str]:
     ]
     if args.disable_collision_guard:
         command.append("--disable-collision-guard")
-    process = subprocess.Popen(
+    process = spawn_route_child(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -119,7 +121,6 @@ def run_door_child(args: argparse.Namespace) -> tuple[int, str]:
         errors="replace",
         bufsize=1,
         env=environment,
-        start_new_session=True,
     )
     output = []
     started = time.monotonic()
@@ -136,7 +137,7 @@ def run_door_child(args: argparse.Namespace) -> tuple[int, str]:
     try:
         while not reader_done or process.poll() is None:
             if time.monotonic() - started > args.door_timeout_s:
-                os.killpg(process.pid, signal.SIGINT)
+                signal_route_child(process, signal.SIGINT)
                 raise TimeoutError("door return child timed out")
             try:
                 line = lines.get(timeout=0.10)
@@ -150,11 +151,11 @@ def run_door_child(args: argparse.Namespace) -> tuple[int, str]:
         return process.wait(timeout=2.0), "".join(output)
     except BaseException:
         if process.poll() is None:
-            os.killpg(process.pid, signal.SIGINT)
+            signal_route_child(process, signal.SIGINT)
             try:
                 process.wait(timeout=4.0)
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGTERM)
+                signal_route_child(process, signal.SIGTERM)
                 process.wait(timeout=2.0)
         raise
 
@@ -308,16 +309,16 @@ def run_placement_detour(args: argparse.Namespace) -> int:
         "--state-file", str(state_file.resolve()),
         "--roi-origin-file", str(args.placement_roi_origin_file.resolve()),
     ]
-    child = subprocess.Popen(command, start_new_session=True)
+    child = spawn_route_child(command)
     try:
         return child.wait(timeout=210)
     except BaseException:
         if child.poll() is None:
-            os.killpg(child.pid, signal.SIGINT)
+            signal_route_child(child, signal.SIGINT)
             try:
                 child.wait(timeout=6)
             except subprocess.TimeoutExpired:
-                os.killpg(child.pid, signal.SIGTERM)
+                signal_route_child(child, signal.SIGTERM)
                 child.wait(timeout=3)
         raise
 

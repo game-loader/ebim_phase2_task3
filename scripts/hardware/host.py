@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stdlib helper, local inside the arm container and sent over SSH to the base."""
+"""Process lifecycle helper used inside the arm and base containers."""
 
 import fcntl
 import json
@@ -57,8 +57,7 @@ class Host:
             if key.startswith(("ROS_", "AMENT_", "COLCON_", "CMAKE_PREFIX", "PYTHONPATH", "LD_LIBRARY_PATH")):
                 env.pop(key, None)
         env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-        if self.role == "arm":
-            env["LD_LIBRARY_PATH"] = "/opt/ebim-libfranka/lib"
+        env["LD_LIBRARY_PATH"] = "/opt/ebim-libfranka/lib:/usr/local/zed/lib:/usr/local/cuda/lib64"
         domain = "arm" if camera else self.role
         env.update(ROS_DOMAIN_ID=str(self.config["domains"][domain]),
                    RMW_IMPLEMENTATION="rmw_cyclonedds_cpp", ROS_LOCALHOST_ONLY="0",
@@ -104,6 +103,8 @@ class Host:
                 raise RuntimeError("mount the base SSH credentials at /root/.ssh")
         else:
             packages += ["franka_bringup", "sick_safetyscanners2", "slam_toolbox", "tf2_ros", "zed_wrapper"]
+            if not Path("/usr/local/zed/zed-config.cmake").is_file():
+                raise RuntimeError("base image is missing the ZED SDK")
         code = "from ament_index_python.packages import get_package_share_directory as p; "
         code += "import rclpy,yaml; " + "; ".join(f"p({name!r})" for name in packages)
         # Package inspection does not initialize a ROS participant or daemon.
@@ -249,6 +250,8 @@ class Host:
                    "--calibration", str(self.release / "calibration.json"),
                    "--base-host", self.config["hosts"]["base"]["ssh"],
                    "--base-root", base_root + "/base/tmr_cycle", "--base-env", env_file,
+                   "--base-container", self.config["hosts"]["base"]["container"],
+                   "--base-release", self.release.name,
                    "--speed", str(self.config["runtime"]["playback_speed"])]
         if execute:
             command.append("--execute")
