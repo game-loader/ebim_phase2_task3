@@ -32,6 +32,15 @@ def main():
         assert (Path(get_package_prefix(package)) / "lib" / f"lib{library}.so").is_file()
     for module in ("rclpy", "tf2_ros", "zed_msgs.msg", "sensor_msgs.msg", "cv2", "numpy"):
         importlib.import_module(module)
+    import cv2
+    import numpy as np
+    from cv_bridge import CvBridge
+
+    pixels = np.full((2, 3, 3), 127, dtype=np.uint8)
+    bridge = CvBridge()
+    message = bridge.cv2_to_imgmsg(pixels, encoding="rgb8")
+    assert np.array_equal(bridge.imgmsg_to_cv2(message, desired_encoding="bgr8"), pixels)
+    assert cv2.cvtColor(pixels, cv2.COLOR_RGB2GRAY).shape == (2, 3)
     assert '"5.1.2"' in Path("/usr/local/zed/zed-config-version.cmake").read_text()
     print("Base assets ready: TMR hardware/controller, SICK, ZED SDK/wrapper and SLAM")
 
