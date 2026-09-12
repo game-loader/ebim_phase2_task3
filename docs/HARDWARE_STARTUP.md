@@ -285,11 +285,28 @@ Rebuild the image to include the renamed directory and updated startup paths.
 The ARM64 base image was built on `.50` from commit `db0f066` as
 `franka-duo-base:db0f066` (image ID
 `sha256:62264216929c4858b1e48359909ea2a939adc1fbafa21dc5aae9ef3cedc0d47a`,
-12.54 GB). The build passed the package/asset checks and 130 base tests. An
+12.54 GB). All 396 tracked source files in the remote build directory matched
+the commit's SHA-256 hashes. The build passed the package/asset checks,
+OpenCV/cv_bridge image conversion and 130 base tests. An
 offline container probe loaded the Franka, mobile, ZED, SICK, controller-manager
 and SLAM libraries and detected one CUDA device. A synthetic CycloneDDS probe
 between this image on `.50` and the existing arm image on `.100` transferred
-228 acknowledged 640x360 RGB frames with matching CameraInfo. The probe emitted
-Fast DDS string deserialization warnings, so production QoS and physical
-operation still require hardware validation. No hardware nodes or motion were
-started; the ZED camera, radar and arms remain untested in this validation.
+228 acknowledged 640x360 RGB frames with matching CameraInfo out of 243 sent
+on domain 0. A second run on isolated domain 42 acknowledged 230 of 245 frames.
+Each run lasted 35 seconds and used sensor-data QoS for images/intrinsics and
+reliable String acknowledgements; frame content was verified with CRC32.
+Counts include discovery/startup time and are not a steady-state loss benchmark.
+Both runs emitted CycloneDDS deserialization warnings on Humble, including
+one on the isolated domain. Their cause remains unresolved despite successful
+image transfer; sustained production traffic still needs validation.
+No hardware nodes or motion were
+started by these checks; live ZED capture, laser scans and physical control
+remain untested in these containers.
+
+Build, offline and DDS logs are retained on `.50` in
+`/home/tmr-user/ebim_phase2_builds/39d9ee2/` (`build-hostnet.log`,
+`offline-verify.log`, `dds-image-domain0.log`, `dds-image-verify.log`);
+the directory name predates the build fixes. The corresponding arm DDS logs
+are in `/home/aup/ebim_phase2_builds/f1ea686/`. Temporary validation containers
+were removed. Set `hosts.base.image` to `franka-duo-base:db0f066` to select this
+image; the default `:phase2` tag was not changed.
