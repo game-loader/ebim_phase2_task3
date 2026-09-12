@@ -40,9 +40,9 @@ camera:
   serial: 17064700
   # The existing policy calibration assumes this camera and mounting geometry.
   calibration: configs/zed_pnp_calibration.json
-  # Optional directory of per-camera SN<serial>.conf files on the base host.
-  # Only calibration data is read; the host ZED SDK is not used.
-  sdk_settings_dir: /usr/local/zed/settings
+  # Leave empty to use the bundled configs/zed_sdk/SN17064700.conf.
+  # Set a base-host directory only when using a different camera serial.
+  sdk_settings_dir: ""
 runtime:
   playback_speed: 0.1
   ready_timeout_s: 120

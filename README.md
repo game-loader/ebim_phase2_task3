@@ -33,14 +33,19 @@ Edit `hardware.yaml` in the checkout on `.100`:
 | `spine.ip`, `base.ip` | Spine and mobile-base controller IPs |
 | `grippers.left_port`, `grippers.right_port` | Correct `/dev/serial/by-id/...` paths on `.100` |
 | `lidars.front_ip`, `lidars.rear_ip`, `lidars.host_ip` | Scanner IPs and receiving interface IP on `.50` |
-| `camera.serial`, `camera.sdk_settings_dir` | ZED serial and `.50` directory containing `SN<serial>.conf` |
-| `camera.calibration` | `.100` camera-to-robot extrinsics file |
+| `camera.serial` | ZED serial; keep `17064700` to use the bundled sample |
+| `camera.sdk_settings_dir` | Leave empty: the matching `SN17064700.conf` is bundled in `configs/zed_sdk/`; only set this for a different serial |
+| `camera.calibration` | Leave the bundled `configs/zed_pnp_calibration.json` unchanged |
 | `domains`, `runtime.playback_speed` | Keep domains 0/97 and speed 0.1 unless both sides change consistently |
 | Component `mode` fields | Keep `managed` for complete startup |
 
-A different ZED serial requires its matching factory `SN<serial>.conf`. The
-factory file and `camera.calibration` extrinsics are separate; changed mounting
-geometry requires new extrinsics, taught poses and route validation.
+The repository already contains the reference camera file
+`configs/zed_sdk/SN17064700.conf`, and the base image copies it into the
+container. For another serial, add its matching `SN<serial>.conf` to the
+repository (or set `camera.sdk_settings_dir` to a directory on `.50`). Leave
+the bundled `camera.calibration` path unchanged; it is the reference
+camera-to-robot extrinsics used by the grasp policy. Changed mounting geometry
+requires a new calibration and taught-pose/route validation.
 
 ## Build, deploy and start
 
@@ -85,8 +90,9 @@ ssh-copy-id -i ~/.ssh/id_ed25519.pub tmr-user@172.16.0.50
 ssh -o BatchMode=yes tmr-user@172.16.0.50 docker version
 ```
 
-After editing `hardware.yaml` and preparing the matching ZED factory file and
-camera extrinsics, run these commands from the checkout root on `.100`:
+After editing the IPs/serials in `hardware.yaml` (the bundled ZED factory file
+and camera extrinsics already need no preparation), run these commands from the
+checkout root on `.100`:
 
 ```bash
 export EBIM_IMAGE=franka-duo-table-mission:phase2
