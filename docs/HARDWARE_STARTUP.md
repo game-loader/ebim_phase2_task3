@@ -203,6 +203,9 @@ version-locked. The build preserves the inspected swerve controller parameters,
 merging upstream duplicate YAML root mappings without changing their values.
 Its offline checks exercise the real TMR xacro, installed executables/libraries,
 SDK version and route tests. No hardware nodes are started during the build.
+The image uses Ubuntu's matching NumPy/OpenCV packages. The SDK base's optional
+`pyzed` Python API and pip NumPy 2 are removed because Humble's OpenCV/cv_bridge
+extensions require the NumPy 1 ABI. The ZED ROS wrapper uses the retained C++ SDK.
 
 Build commands on the corresponding architectures:
 

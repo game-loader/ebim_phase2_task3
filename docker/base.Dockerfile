@@ -44,9 +44,14 @@ RUN test "$(dpkg --print-architecture)" = arm64 \
        ros-humble-diagnostic-updater ros-humble-robot-localization \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY docker/ /app/docker/
+COPY docker/base_drivers.lock.json docker/fetch_drivers.py docker/prepare_base_sources.py docker/build_base_drivers.sh /app/docker/
 RUN CMAKE_BUILD_PARALLEL_LEVEL=2 bash /app/docker/build_base_drivers.sh
+# The ZED image ships pip NumPy 2 for its optional Python API. Humble's
+# OpenCV/cv_bridge use the Ubuntu NumPy 1 ABI. Our ZED wrapper uses the C++ SDK,
+# so remove the unused Python API and use the matching apt NumPy/OpenCV pair.
+RUN python3 -m pip uninstall -y pyzed numpy
 ENV LD_LIBRARY_PATH=/opt/ebim-libfranka/lib:/usr/local/zed/lib:/usr/local/cuda/lib64
+COPY docker/ /app/docker/
 COPY scripts/hardware/ /app/scripts/hardware/
 COPY base/ /app/base/
 COPY configs/zed_sdk/ /app/configs/zed_sdk/
