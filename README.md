@@ -1,18 +1,121 @@
-# Franka Duo Mobile — Cup / Bowl Mobile Pick-and-Place
+# Franka Duo Mobile: Cup / Bowl Pick-and-Place
 
-Mobile manipulation policy for a Franka Duo Mobile (dual FR3 on a lifting
-spine, TMR swerve base). The robot drives to a table, finds a cup and a bowl
-with the head camera, picks them with both arms, carries them to a second
-table, lowers and lifts them while keeping both grippers closed, drives back, and finally
-leaves them on a third table.
+双 FR3 杯碗抓取与移动任务。以下假设目标也有相同硬件和底层配置的
+`.100` 机械臂主机及 `.50` Jetson 底盘主机。两台机器都从本仓库源码构建，
+不依赖预先交付的镜像或我们测试机器上的文件。
 
-**All arm motion runs through joint impedance control.** No PTP or joint
-position motion generator is used anywhere in the pipeline. The Franka
-Cartesian/joint-position generators reflex on a single discontinuous sample;
-the impedance controller does not, and the demonstrations this policy was tuned
-against were recorded under it.
+## 硬件前提
+
+| 位置 | 需要具备 |
+| --- | --- |
+| 机器人 | 双 FR3v2（FCI 可用）、原有升降 Spine / TMR 底盘、两个 Robotiq 2F-85、前后 SICK 雷达、ZED Mini；安装位置与原机一致 |
+| `.100` | AMD64 Linux、原有 Franka 实时内核/网络配置、Docker、Git、Bash、SSH 客户端、两个夹爪 USB-RS485 设备；不需要 GPU |
+| `.50` | Jetson Orin、匹配的 L4T R36.4 / NVIDIA 驱动、Docker + NVIDIA runtime、Git、Python 3、SSH 服务、ZED USB 3 连接 |
+| 网络与权限 | 原有硬件网段和路由可用；两机 DDS UDP/组播互通、时钟同步；`.100` 容器可免密 SSH 到 `.50`，对应用户可直接运行 Docker |
+
+未安装的上述宿主机工具需先安装；两机首次构建需要联网，并预留镜像与编译缓存空间。
+ROS、运动学库、驱动、ZED SDK 会在构建时安装到镜像，模型、权重和默认路线随源码打包，
+不需要主机提前启动 ROS topic，也不需要 HTTP 图像服务。
+机械臂使用阻抗控制。沿用两机现有底层配置即可；Docker 不提供宿主机内核或硬件网络配置。
+
+## 填写 hardware.yaml
+
+在 **`.100` 的本仓库根目录**修改 [hardware.yaml](hardware.yaml)：
+
+| 字段 | 填写内容 |
+| --- | --- |
+| `image` | 保留 `franka-duo-table-mission:phase2`，对应下方在 `.100` 构建的镜像 |
+| `hosts.base.image` / `hosts.base.ssh` | 保留 `franka-duo-base:phase2` / 填写 `.50` 的 SSH 用户和地址 |
+| `hosts.arm.dds_address` / `hosts.base.dds_address` | 两台主机实际用于 DDS 通信的本机 IP |
+| `arms.left_ip` / `arms.right_ip` | 左右机械臂 IP |
+| `spine.ip` / `base.ip` | 升降机构 / 底盘控制器 IP |
+| `grippers.left_port` / `grippers.right_port` | `.100` 上左右夹爪的 `/dev/serial/by-id/...` 路径 |
+| `lidars.front_ip` / `lidars.rear_ip` / `lidars.host_ip` | 前后雷达 IP / `.50` 接收雷达数据的本机接口 IP |
+| `camera.serial` / `camera.sdk_settings_dir` | ZED 序列号 / `.50` 上存放对应 `SN<序列号>.conf` 的目录 |
+| `camera.calibration` | `.100` 上相机到机器人的外参文件，可填相对于 YAML 的路径 |
+| 其余字段 | 相同硬件通常保留默认：各设备 `mode: managed`、DDS 域 0/97、回放速度 0.1 |
+
+换相机序列号必须准备对应出厂标定文件；镜像内仅附带 `SN17064700.conf`。
+相机外参与出厂标定是两份不同的数据，安装位置变化时需重新校准外参。
+
+## 部署与启动
+
+先在**两台机器各执行一次**，获取同一版本源码（也可直接解压同一份提交源码包）：
+
+```bash
+git clone https://github.com/game-loader/ebim_phase2_task3.git
+cd ebim_phase2_task3
+git rev-parse HEAD  # 两端应为同一提交；私有仓库需先配置访问权限
+```
+
+**在 `.50` 的仓库根目录构建底盘镜像：**
+
+```bash
+docker build --network host --platform linux/arm64 -f docker/base.Dockerfile \
+  --build-arg UBUNTU_APT_MIRROR=https://mirrors.ustc.edu.cn/ubuntu-ports/ \
+  --build-arg ROS_APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/ros2/ubuntu \
+  --build-arg GIT_PROXY=https://gh-proxy.org \
+  -t franka-duo-base:phase2 .
+```
+
+**在 `.100` 的仓库根目录构建机械臂镜像：**
+
+```bash
+docker build --network host --platform linux/amd64 \
+  --build-arg UBUNTU_APT_MIRROR=https://mirrors.ustc.edu.cn/ubuntu/ \
+  --build-arg ROS_APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/ros2/ubuntu \
+  --build-arg GIT_PROXY=https://gh-proxy.org \
+  --build-arg PIP_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
+  -t franka-duo-table-mission:phase2 .
+```
+
+两条构建命令会下载各自的基础镜像及依赖。国内源和 GitHub 代理参数可按网络情况去掉。
+底盘镜像使用 Dockerfile 中锁定的官方 ZED 基础镜像，无需先导入我们构建的镜像。
+
+**在 `.100` 配置到 `.50` 的免密 SSH**（已有可用密钥则跳过生成）：
+
+```bash
+ssh-keygen -t ed25519
+ssh-copy-id -i ~/.ssh/id_ed25519.pub tmr-user@172.16.0.50
+ssh -o BatchMode=yes tmr-user@172.16.0.50 docker version
+```
+
+将用户/IP 替换为 `hosts.base.ssh` 的值，首次连接时核对主机指纹。
+密钥必须支持容器无人值守使用；默认流程不转发 SSH agent、不提示输入密钥口令。
+
+**两端构建成功，按上表填写 `.100` 的 YAML 和准备相机标定后，在 `.100` 启动：**
+
+```bash
+export EBIM_IMAGE=franka-duo-table-mission:phase2
+bash scripts/docker_hardware.sh plan
+bash scripts/docker_hardware.sh check
+bash scripts/docker_hardware.sh up --activate
+bash scripts/docker_hardware.sh status
+bash scripts/docker_hardware.sh mission --execute
+# 任务结束后有序关闭两端受管理的驱动：
+bash scripts/docker_hardware.sh down
+```
+
+`.100` 的 `~/.ssh` 会只读挂入容器，需包含可无人值守使用的私钥和已确认的
+`.50` 主机指纹 `known_hosts`；容器不会转发本机 SSH agent 或提示输入密码。
+非默认目录用 `EBIM_SSH_DIR=/绝对路径` 指定。
+
+所有日常命令都在 **`.100` 本地执行**，只对 `.50` 使用 SSH。
+`up --activate` 自动启动两端驱动、部署路线并激活阻抗控制；
+`mission --execute` 才执行移动和抓取。已有原生驱动会报冲突，需先处理。
+从已停止的状态一键启动并执行可用 `bash scripts/docker_hardware.sh run --execute`；
+不要在已经 `up` 后重复运行它。Pixi 可选，同等命令为 `pixi run run --execute`。
 
 ---
+
+以下为构建方法、验证说明、原生部署参考及任务细节。使用上面的容器流程时，
+不需要执行原生部署章节。
+
+历史测试使用过底盘镜像 `db0f066` 和机械臂镜像 `a33d17b`，仅作为验证记录，
+不作为目标机器的部署输入；目标两端均按上文从当前源码构建 `:phase2` 镜像。
+镜像离线检查及两机合成图像 DDS 测试已通过，仍有 DDS 警告待排查；
+真实相机采集及整机运动尚未完成容器验证。
+详见 [构建与验证记录](docs/HARDWARE_STARTUP.md#build-and-validation-status)。
 
 ## 1. Hardware assumptions
 
@@ -23,6 +126,8 @@ against were recorded under it.
 | Grippers | 2x Robotiq 2F-85 (`0.0` open ... `0.8` closed) |
 | Spine | Prismatic `franka_spine_vertical_joint`, range `[0.0, 0.85] m` |
 | Head camera | ZED Mini, rectified RGB 640x360. **Depth is not used.** |
+| Navigation sensors | Front and rear SICK safety laser scanners supported by `sick_safetyscanners2`, with the original mounting transforms |
+| Computers | AMD64 arm host (`.100`) and Jetson Orin ARM64 base/camera host (`.50`); these addresses are configurable |
 | Wrist cameras | Not used |
 | GPU | Arm perception runs `yolo11n-seg` on CPU; ZED uses the base Jetson GPU through NVIDIA Container Runtime |
 
@@ -35,36 +140,6 @@ Control rates: the policy publishes 20-D action chunks at `30 Hz x
 playback_speed` (default `0.1`, i.e. 3 Hz). The hardware startup workflow runs
 the 1 kHz joint tracker, impedance controllers and arm drivers in the same
 container on the arm host.
-
-### Hardware-configured startup
-
-The new [hardware startup workflow](docs/HARDWARE_STARTUP.md) uses
-[`hardware.yaml`](hardware.yaml) and Pixi tasks:
-
-Run these commands directly on the target `.100` arm host. Arm-side operations
-execute locally; SSH is used only to reach the separate `.50` base host.
-
-```bash
-pixi run plan
-pixi run check
-pixi run up --activate
-pixi run mission --execute
-```
-
-This starts two containers with host networking: the Jazzy arm runtime on
-`.100` and the Humble TMR/LiDAR/ZED/navigation runtime on `.50`. Bundled routes
-and adapters are deployed into the base container's persistent volume. Both
-hosts need their completed images and hardware access, with no host ROS
-workspace or ZED SDK dependency. `.50` additionally needs the matching Jetson
-system/NVIDIA Docker runtime, SSH and Python 3 standard library. `up --activate`
-enables impedance control after measured-position alignment; mission execution
-is separate. Existing unmanaged drivers are reported as conflicts. The manual
-bring-up instructions below remain available as a legacy deployment path.
-Without Pixi use `bash scripts/docker_hardware.sh <command>`. For startup plus
-the physical mission use `pixi run run --execute`; stop with `pixi run down`.
-The AMD64 arm image was built and verified offline on `.100` on 2026-09-12
-(`franka-duo-table-mission:a33d17b`, 255 tests passed). The ARM64 base image
-build and physical validation remain pending; see the linked validation record.
 
 ### Cell assumptions
 
@@ -88,8 +163,12 @@ build and physical validation remain pending; see the linked validation record.
 2. Put cup, bowl and plate back on the tray on the pick table.
 3. Clear the letter-side and placement tables.
 4. Open both grippers.
-5. Delete `outputs/table_mission.json` or pass `--fresh-start-confirmed`; the
-   checkpoint refuses to replay a drive that already happened.
+5. After confirming the physical reset, archive/clear the mission checkpoint.
+   Managed deployment stores it at `/app/outputs/table_mission.json` in the arm
+   container's persistent outputs volume, not the checkout's `outputs/`.
+   Removing/recreating the runtime does not clear it. The standalone mission CLI
+   also accepts `--fresh-start-confirmed`; the managed launcher does not forward
+   this flag. The checkpoint refuses to replay a drive that already happened.
 
 ---
 
@@ -124,13 +203,35 @@ during build and retain their sources/licenses.
 | --- | --- | --- | --- |
 | `franka_ros2` (incl. `franka_bringup`, `franka_mobile_sensors`, `franka_spine_server`, `franka_description`) | both | github.com/frankarobotics/franka_ros2 | base host: `1006036` (humble); arm host: Jazzy workspace |
 | `libfranka` | both | github.com/frankarobotics/libfranka | `95b406f4` |
-| `ros2_robotiq_gripper` | base | github.com/PickNikRobotics/ros2_robotiq_gripper | `a29c69b` (humble) |
+| `ros2_robotiq_gripper` | arm | github.com/PickNikRobotics/ros2_robotiq_gripper | `a29c69b` (built against Jazzy in the arm image) |
 | `zed-ros2-wrapper` | base | github.com/stereolabs/zed-ros2-wrapper | `458c725` + our patch |
 | `sick_safetyscanners2` | base | github.com/SICKAG/sick_safetyscanners2 | `886a81a` |
 | `olvx_descriptions_module` | base | github.com/olive-robotics/olvx_descriptions_module | `c3444ed` |
 | `gello_software` | both | github.com/wuphilipp/gello_software | `fa0407b` (our overlay forked from this) |
 
-### 2.2 Runtime requirements
+### 2.2 Container deployment requirements
+
+The following dependencies must exist outside the images:
+
+| Location | Required hardware / host setup |
+| --- | --- |
+| Robot | Dual FR3v2, compatible robot firmware/FCI enabled, original Spine/TMR swerve system, two Robotiq 2F-85 grippers, two SICK scanners and ZED Mini; original model, TCPs and mounting geometry |
+| Arm host (`.100`) | AMD64 Linux with Docker Engine and Bash, suitable real-time kernel/scheduling and network setup for 1 kHz Franka FCI, access to both grippers' USB-RS485 serial devices; no GPU required |
+| Base host (`.50`) | Jetson Orin ARM64 with matching JetPack/L4T R36.4 kernel and NVIDIA drivers, Docker Engine with `nvidia` runtime, SSH server and Python 3 standard library; ZED USB 3/video devices available |
+| Network | Host interface addresses and routes to arms, Spine/base and scanners; scanner receiving IP assigned to the base host; DDS UDP/multicast between the two computers, SSH from arm to base, synchronized clocks |
+| Access | Local arm user can run Docker; the base SSH user can run Docker without interactive sudo; an unattended SSH key and verified `known_hosts` available inside the arm container |
+| Calibration | Matching `SN<serial>.conf` ZED factory intrinsics on `.50`; validated camera-to-robot extrinsics at `camera.calibration` on `.100` |
+| Artifacts / storage | Complete AMD64 arm and ARM64 base images loaded on their respective hosts, this checkout on `.100` for the launcher/YAML/calibration, and space for images, build cache and persistent logs |
+
+The inspected Jetson runs Ubuntu 22.04.5 / L4T R36.4.0. The base image supplies
+CUDA 12.6 user-space libraries and ZED SDK 5.1.2. Installing generic Ubuntu
+24.04 alone does not provide Jetson's matching kernel/drivers or Franka real-time
+setup: containers share the host kernel. Keep the already configured system
+baseline when deploying to an identical robot.
+
+The recorded arm image is about 6.13 GB and the base image 12.54 GB (shared
+layers affect actual disk use). Building and retaining import archives needs
+additional space; these image sizes are not build-space requirements.
 
 The arm container carries the policy, Python dependencies, Franka/Robotiq drivers,
 custom impedance controllers, Spine server, joint servo and relay. The default
@@ -141,8 +242,9 @@ The image also builds the joint servo, relay and Spine message interfaces.
 The servo loads the exported default Duo model from `.100`, including both
 KDL configurations and all referenced meshes. It no longer needs the host's
 `franka_mobile_fr3_duo_moveit_config` package or a `site/install` bind mount.
-MoveIt/KDL/Ruckig run where the servo runs: inside the image when using its
-`servo` mode, or installed on the host when using the existing host servo.
+MoveIt/KDL supply the robot model and IK inside the image; Ruckig tracks joint
+targets. No `move_group` motion-planning server is started. The hardware remains
+under joint impedance control, and no host kinematics installation is needed.
 The default `mission` mode still expects a running servo/relay and active
 impedance controllers; use the hardware workflow to start the complete stack.
 See [bundled model provenance and validation](site/franka_duo_joint_servo/MODEL.md).
@@ -158,10 +260,19 @@ See [bundled model provenance and validation](site/franka_duo_joint_servo/MODEL.
 | ROS 2 **Humble** | Inside the base image; navigation uses a separate DDS domain |
 | Docker | Both images use `--network host`; `.50` uses NVIDIA runtime for ZED |
 
-**Network at run time:** no internet needed. Weights, extrinsics and the action
-contract are baked into the image. The container does need **host networking**
-for DDS and SSH to the base host. Preload both images, SSH credentials and the
-matching ZED factory calibration before offline deployment.
+Default `managed` mode starts the required ROS publishers/services using the
+drivers inside the images; pre-existing ROS topics, native ROS/MoveIt/vendor
+workspaces and an image HTTP server are not deployment prerequisites.
+`external` mode instead requires already-running compatible interfaces; it
+does not adapt arbitrary topic names. Existing unmanaged drivers must be
+reconciled before managed startup; the launcher reports conflicts.
+
+**Network at run time:** no internet needed after both images, SSH access and
+calibration are prepared. Weights, models, default routes, taught poses and the
+action contract are bundled. The launcher mounts the YAML-selected policy
+calibration from the arm host. Both containers use **host networking**; this
+does not configure host interfaces/routes, supply a missing RT kernel or
+install NVIDIA drivers. No `--privileged` or Docker socket mount is required.
 
 ### Required ROS 2 interfaces
 
@@ -193,7 +304,10 @@ Services / actions called:
 /franka_duo_joint_servo/get_parameters               rcl_interfaces/srv/GetParameters
 ```
 
-Topic names are configurable in `configs/tmr_rgb20d.yaml`.
+These are runtime interfaces created by managed startup, not topics the host
+must publish in advance. Standalone policy settings include topic options in
+`configs/tmr_rgb20d.yaml`; managed startup expects the canonical interfaces
+listed here.
 
 ---
 
@@ -230,6 +344,7 @@ this container. Deploy them once:
 rsync -a base/tmr_base/       <user>@<base-host>:~/tmr_base/
 rsync -a base/tmr_navigation/  <user>@<base-host>:~/tmr_navigation/
 rsync -a hosts/base/home/      <user>@<base-host>:~/
+rsync -a hosts/base/vendor_patches/ <user>@<base-host>:~/vendor_patches/
 
 # On the base host: apply the two vendor patches, build the adapter package.
 cd ~/ros2_ws/src/franka_ros2    && git apply ~/vendor_patches/franka_bringup_tmr_config.patch
@@ -263,6 +378,19 @@ Confirm `/swerve_drive_controller/odom`, `/lidar_front/scan`,
 runs. Note the stack runs with `ROS_LOCALHOST_ONLY=1`; probe it with the same
 setting.
 
+For the legacy native ZED wrapper, use a separate terminal on the **base host**
+with its Humble workspace. The camera uses the arm DDS domain, unlike navigation:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0 RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export CYCLONEDDS_URI="file://$HOME/cyclonedds.xml"
+# Verify the DDS interface address and replace the serial for another camera.
+ros2 launch zed_wrapper zed_camera.launch.py \
+  camera_model:=zedm namespace:=head_camera publish_tf:=false serial_number:=17064700
+```
+
 ### Arm host
 
 ```bash
@@ -281,12 +409,11 @@ ros2 launch franka_fr3_arm_controllers franka.launch.py \
   load_gripper:=false joint_sources:=joint_states
 # same for arm_prefix:=right namespace:=right robot_ip:=<RIGHT_IP>
 
-# 2. Grippers (ours), spine server (upstream franka_ros2), ZED (upstream wrapper).
+# 2. Grippers (ours) and spine server (upstream franka_ros2) on the arm host.
 ros2 launch franka_gripper_manager robotiq_gripper_controller_client.launch.py \
   config_file:=example_fr3_duo_config_robotiq.yaml
 ros2 launch franka_spine_server spine.launch.py spine_ip:=<SPINE_IP>
-ros2 launch zed_wrapper zed_camera.launch.py camera_model:=zedm camera_name:=head_camera \
-  publish_tf:=false ros_params_override_path:=~/zed_override.yaml
+# The ZED wrapper runs separately on the base host as shown above.
 
 # 3. Build our joint servo packages from this checkout.
 colcon build --base-paths site --build-base site/build \
@@ -310,53 +437,175 @@ bash scripts/reconnect_arm_state.sh both
 
 ---
 
-## 5. Build and run
+## 5. Container deployment
+
+### 5.1 Build or load both images
+
+Build the current checkout on each matching architecture. The arm and base
+are **separate images**. `plan/check/up/run` never builds or pulls either one.
+On the AMD64 builder (for example `.100`), from the repository root:
 
 ```bash
-# Build later on matching builders, then load each image on its target host.
-docker build --platform linux/amd64 -t franka-duo-table-mission:phase2 .
-docker build --platform linux/arm64 -f docker/base.Dockerfile -t franka-duo-base:phase2 .
+docker build --network host --platform linux/amd64 \
+  --build-arg UBUNTU_APT_MIRROR=https://mirrors.ustc.edu.cn/ubuntu/ \
+  --build-arg ROS_APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/ros2/ubuntu \
+  --build-arg GIT_PROXY=https://gh-proxy.org \
+  --build-arg PIP_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
+  -t franka-duo-table-mission:phase2 .
+```
 
-# Offline self-check: no robot, no network.
-docker run --rm franka-duo-table-mission:phase2 selftest
+On the matching Jetson ARM64 builder (for example `.50`), with the same checkout:
 
-# Offline model check: both arms' FK/IK, no robot connection or commands.
-docker run --rm franka-duo-table-mission:phase2 model-check
+```bash
+docker build --network host --platform linux/arm64 -f docker/base.Dockerfile \
+  --build-arg UBUNTU_APT_MIRROR=https://mirrors.ustc.edu.cn/ubuntu-ports/ \
+  --build-arg ROS_APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/ros2/ubuntu \
+  --build-arg GIT_PROXY=https://gh-proxy.org \
+  -t franka-duo-base:phase2 .
+```
 
-# Dry run: prints the 12-step plan, starts nothing.
-docker run --rm --network host franka-duo-table-mission:phase2 mission \
-  --base-host <user>@<base-host> --base-root <base-routes-path>
+The mirror/proxy arguments are optional and only affect the build. ARM64
+Ubuntu packages require `ubuntu-ports`. The base Dockerfile defaults to the
+pinned ZED image digest. When using a previously imported ZED base, see the
+[offline base-image instructions](docs/HARDWARE_STARTUP.md#build-and-validation-status)
+for image-ID verification and the `BASE_IMAGE` override.
 
-# Full managed runtime and mission; hardware.yaml supplies all addresses.
-bash scripts/docker_hardware.sh run --execute
-# After the mission, target streams continue until an orderly shutdown:
+Alternatively, export completed images on their builders and transfer the
+archives to the corresponding hosts. These archives must contain the **complete
+application images**; importing `stereolabs/zed` alone still requires a base build.
+
+```bash
+# On the respective builders:
+docker save -o arm-image.tar franka-duo-table-mission:phase2
+docker save -o base-image.tar franka-duo-base:phase2
+# After transferring arm-image.tar to .100, run there:
+docker load -i arm-image.tar
+# After transferring base-image.tar to .50, run there:
+docker load -i base-image.tar
+```
+
+An image built directly on its target needs no export/import. The deployment
+above builds both images from the current source. Historical image tags are
+validation records only; the old `a33d17b` arm image lacks the route rename and
+closed-gripper test-placement update.
+
+### 5.2 Configure hardware and SSH
+
+On `.100`, edit `hardware.yaml` in this checkout:
+
+| YAML field | Set to |
+| --- | --- |
+| `image` | Loaded AMD64 arm image tag; also set `EBIM_IMAGE` if different from `franka-duo-table-mission:phase2` |
+| `hosts.base.image`, `hosts.base.ssh` | Loaded ARM64 base image tag and `.50` SSH user/address |
+| `hosts.arm.dds_address`, `hosts.base.dds_address` | Actual local DDS interface IP on each host |
+| `arms.left_ip`, `arms.right_ip`, `spine.ip`, `base.ip` | Hardware controller IPs |
+| `grippers.left_port`, `grippers.right_port` | Actual `/dev/serial/by-id/...` paths on `.100`, assigned to the correct arm |
+| `lidars.front_ip`, `lidars.rear_ip`, `lidars.host_ip` | Scanner addresses and receiving interface IP on `.50` |
+| `camera.serial`, `camera.sdk_settings_dir` | ZED serial and directory on `.50` containing its `SN<serial>.conf` |
+| `camera.calibration` | Policy camera-to-robot extrinsics file on `.100`, relative to YAML or absolute |
+| `domains`, `runtime.playback_speed` | DDS domains (default arm/camera 0, navigation 97) and consistent policy/servo speed (default 0.1) |
+
+Keep component modes `managed` for full startup. IPs/serials do not describe
+changed geometry: verify mounting transforms, extrinsics and the taught routes
+for the destination cell. Routes are already bundled; no `~/tmr_base` or native
+ROS workspace needs to exist on either host. The supplied factory intrinsics
+are for ZED serial `17064700`; a different serial needs its own factory file.
+
+Prepare key-based SSH from the arm container to `.50`. The launcher mounts
+`$HOME/.ssh` read-only as `/root/.ssh`; `EBIM_SSH_DIR` selects another absolute
+directory. Include a usable unattended key and verified `known_hosts` entry.
+Key/config paths must be valid inside the container; the launcher does not
+forward a host SSH agent or prompt for passwords. Do not put credentials in YAML.
+
+```bash
+# On .100, from the checkout root. Keep this equal to hardware.yaml's image.
+export EBIM_IMAGE=franka-duo-table-mission:phase2
+
+# Test SSH and Docker access from the same container environment.
+# Replace this user/address if hosts.base.ssh differs.
+docker run --rm --pull never --network host \
+  --mount "type=bind,src=${EBIM_SSH_DIR:-$HOME/.ssh},dst=/root/.ssh,readonly" \
+  --entrypoint ssh "$EBIM_IMAGE" \
+  -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=8 \
+  tmr-user@172.16.0.50 docker version
+```
+
+### 5.3 Check, start and execute on .100
+
+All commands below run **locally on the target arm host**, from this checkout.
+They use SSH only for the separate base host. With the two images and hardware
+configuration prepared:
+
+```bash
+# Offline arm software/model checks; no devices or network.
+docker run --rm --pull never --network none "$EBIM_IMAGE" selftest
+docker run --rm --pull never --network none "$EBIM_IMAGE" model-check
+
+# Print configuration and startup plan; no host connections.
+bash scripts/docker_hardware.sh plan
+# Inspect dependencies, devices, base image and SSH; starts no drivers.
+bash scripts/docker_hardware.sh check
+# Start drivers/servo, align targets and activate impedance; no mission yet.
+bash scripts/docker_hardware.sh up --activate
+bash scripts/docker_hardware.sh status
+# Print the mission plan using the running runtime's configuration.
+bash scripts/docker_hardware.sh mission
+# Execute physical base, Spine, arm and gripper actions.
+bash scripts/docker_hardware.sh mission --execute
+# After the mission: deactivate controllers and shut down managed drivers.
 bash scripts/docker_hardware.sh down
 ```
 
-`--speed` **must** equal the servo `playback_speed`; the policy checks this and
-refuses to publish otherwise. If your ROS domain or RMW differ, pass
-`-e ROS_DOMAIN_ID=... -e RMW_IMPLEMENTATION=...`.
-
-### Staged bring-up (recommended first)
+For subsequent rounds, after reset and with the managed runtime stopped, startup
+plus the physical mission can be invoked with one command:
 
 ```bash
-# Spine only.
-docker run --rm --network host franka-duo-table-mission:phase2 spine --target-m 0.468 --execute
-
-# Stow the arms only.
-docker run --rm --network host \
-  franka-duo-table-mission:phase2 grasp --pose-only travel_stow --publish --enable-robot
-
-# Perception only from a saved frame; never moves the robot.
-docker run --rm -v "$PWD/frame.jpg:/frame.jpg:ro" \
-  franka-duo-table-mission:phase2 grasp --image /frame.jpg
-
-# Grasp both objects and hold; skip every placement leg.
-docker run --rm --network host -v ~/.ssh:/root/.ssh:ro \
-  franka-duo-table-mission:phase2 mission \
-    --base-host <user>@<base-host> --base-root <base-routes-path> \
-    --stop-after-grasp --execute
+bash scripts/docker_hardware.sh run --execute
+# The runtime stays alive after the mission; shut it down explicitly.
+bash scripts/docker_hardware.sh down
 ```
+
+`up --activate` starts two containers, deploys routes into `.50`'s persistent
+volume, starts the managed drivers and checks live interfaces before reporting
+ready. It can activate hardware and is not an offline test. `run --execute`
+includes this startup; do not run it after a separate `up`. On failures use
+`status` / `logs`; existing runtimes are retained for inspection. Use `down`
+for orderly shutdown before restarting or changing YAML.
+
+`plan/check/up/run` accept `--hardware /absolute/path/hardware.yaml`.
+`status/mission/down` use the running container's configuration snapshot.
+`EBIM_CONTAINER` overrides the default arm container `ebim-cup-bowl-runtime`.
+
+### 5.4 Optional Pixi and logs
+
+Pixi wraps the same Bash launcher. Prepare its environment before an offline
+deployment; it is needed only on `.100`, not inside the images or on `.50`.
+
+```bash
+pixi install
+pixi run plan                 # Local Python plan; does not require an image.
+pixi run check
+pixi run up --activate
+pixi run status
+pixi run mission --execute
+pixi run down
+# Alternatively, from a stopped runtime: pixi run run --execute
+```
+
+With the default arm container name:
+
+```bash
+bash scripts/docker_hardware.sh logs
+docker exec ebim-cup-bowl-runtime tail -n 100 /app/runtime/logs/arm.log
+docker exec ebim-cup-bowl-runtime tail -n 100 /app/runtime/logs/servo.log
+docker cp ebim-cup-bowl-runtime:/app/outputs ./mission-outputs
+```
+
+State, logs and mission checkpoints persist in Docker volumes across `down`.
+Export outputs before removing the arm container. Follow the reset-between-rounds
+procedure before replaying a completed mission. Standalone `mission/grasp/spine`
+entrypoints assume the necessary drivers are already running; they are not
+replacements for managed hardware startup.
 
 ---
 
