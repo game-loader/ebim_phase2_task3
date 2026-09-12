@@ -1,7 +1,7 @@
 {
   "franka_ros2": {"url": "https://github.com/frankarobotics/franka_ros2.git", "commit": "73a1501d76efa2bc4bf09cb2af9c2b72c2c642da"},
   "franka_description": {"url": "https://github.com/frankarobotics/franka_description.git", "commit": "02afaae282d4a8e10d7d2f781b23b3515c303ce5"},
-  "libfranka": {"url": "https://github.com/frankarobotics/libfranka.git", "commit": "95b406f47c97cedfbe426c04d8fb7f83a9885e1c"},
+  "libfranka": {"url": "https://github.com/frankarobotics/libfranka.git", "commit": "95b406f47c97cedfbe426c04d8fb7f83a9885e1c", "tag": "0.20.4"},
   "ros2_robotiq_gripper": {"url": "https://github.com/PickNikRobotics/ros2_robotiq_gripper.git", "commit": "a29c69b7516b7a97737b5e43e118e6598ace0832"},
   "serial": {"url": "https://github.com/tylerjw/serial.git", "commit": "d8d160678aa0b31cdf467c052b954fa287cc6cdf"}
 }
