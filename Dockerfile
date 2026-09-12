@@ -77,14 +77,16 @@ RUN CMAKE_BUILD_PARALLEL_LEVEL=2 bash /app/docker/build_drivers.sh
 # Dependencies first, so edits to the policy do not invalidate this layer.
 # --system-site-packages keeps the apt-installed rclpy and message modules
 # importable; a clean venv would hide the entire ROS 2 Python API.
-# Perception runs on CPU (~15 ms per frame after warm-up), so the CPU-only
-# torch wheels are used and no CUDA runtime is needed.
+# Perception runs on CPU. Explicit local-version pins prevent pip from
+# selecting CUDA wheels from the primary package index.
 COPY pyproject.toml ./
 ARG PIP_INDEX_URL=https://pypi.org/simple
 RUN python3 -m venv --system-site-packages /app/.venv \
     && /app/.venv/bin/pip install --upgrade pip \
     && /app/.venv/bin/pip install \
          --extra-index-url https://download.pytorch.org/whl/cpu \
+         "torch==2.8.0+cpu" \
+         "torchvision==0.23.0+cpu" \
          "numpy>=1.23.5,<2.3.0" \
          "PyYAML>=6.0.2,<7.0.0" \
          "opencv-python-headless>=4.9.0,<5.0.0" \
