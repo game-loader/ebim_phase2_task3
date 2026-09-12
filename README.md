@@ -3,7 +3,7 @@
 Mobile manipulation policy for a Franka Duo Mobile (dual FR3 on a lifting
 spine, TMR swerve base). The robot drives to a table, finds a cup and a bowl
 with the head camera, picks them with both arms, carries them to a second
-table, sets them down and picks them straight back up, drives back, and finally
+table, lowers and lifts them while keeping both grippers closed, drives back, and finally
 leaves them on a third table.
 
 **All arm motion runs through joint impedance control.** No PTP or joint
@@ -109,7 +109,7 @@ requirements and commands are in [Hardware startup](docs/HARDWARE_STARTUP.md).
 | `site/franka_duo_joint_servo/` | arm host, colcon | **Our joint servo**: 20-D chunks → KDL IK → 1 kHz Ruckig tracker → gello relay → impedance controller. |
 | `site/franka_duo_ptp_step/` | arm host, colcon | Our homing utility. Not on the mission path. |
 | `src/franka_duo_tele_data/` | this container | The policy. |
-| `base/tmr_cycle/` | base host, `~/tmr_cycle` | **Our navigation routes** (07 outbound, 13 post-grasp, 15 return, 20 placement detour), the exclusive velocity adapter, and live table-leg detection. |
+| `base/tmr_base/` | base host, `~/tmr_base` | **Our navigation routes** (07 outbound, 13 post-grasp, 15 return, 20 placement detour), the exclusive velocity adapter, and live table-leg detection. |
 | `base/tmr_navigation/` | base host, colcon | **Our local navigation adapter package**: odom frame adapter, dual-LiDAR merger, SLAM launch. |
 | `hosts/arm/env/` | arm host `~/` | `tmr_env.sh` + `source_migrated_stack.sh` (sources Jazzy → `franka_ros2` → our overlay) and `cyclonedds.xml` (binds DDS to the arm host's interface). |
 | `hosts/base/home/` | base host `~/` | `start_tmr_sensors.sh`, `zed_override.yaml`, `zed_relaunch.sh`, `cyclonedds.xml`. |
@@ -221,13 +221,13 @@ mount a key with `-v ~/.ssh:/root/.ssh:ro`.
 
 The base routes (`07_start_to_pickup.py`, `13_post_grasp_route.py`,
 `15_return_from_letter.py`, `20_after_return_placement.py`) are shipped in
-**`base/tmr_cycle/`**, together with the local navigation adapter package in
+**`base/tmr_base/`**, together with the local navigation adapter package in
 **`base/tmr_navigation/`**. They run on the base host under ROS 2 Humble, not in
 this container. Deploy them once:
 
 ```bash
 # From the checkout, copy our trees and home scripts to the base host.
-rsync -a base/tmr_cycle/       <user>@<base-host>:~/tmr_cycle/
+rsync -a base/tmr_base/       <user>@<base-host>:~/tmr_base/
 rsync -a base/tmr_navigation/  <user>@<base-host>:~/tmr_navigation/
 rsync -a hosts/base/home/      <user>@<base-host>:~/
 
@@ -238,7 +238,7 @@ cd ~/tmr_navigation && source /opt/ros/humble/setup.bash && colcon build --symli
 ```
 
 The mission calls the routes by name under `--base-root` (default
-`/home/tmr-user/tmr_cycle`). Two site-specific changes are already applied in
+`/home/tmr-user/tmr_base`). Two site-specific changes are already applied in
 this copy: the step-20 detour shifts left **0.85 m**, and its table-leg ROI is
 referenced to the pose the base is standing in when the detour starts, so no
 saved START capture is needed.
@@ -253,7 +253,7 @@ these drivers alongside the managed container.
 ### Base host
 
 ```bash
-cd ~/tmr_cycle            # the deployed copy of base/tmr_cycle (Section 3)
+cd ~/tmr_base            # the deployed copy of base/tmr_base (Section 3)
 bash scripts/19_ensure_navigation_stack.sh   # controller, odometry, dual LiDAR, SLAM, velocity adapter
 bash scripts/17_control_mode.sh mission      # take the exclusive mission velocity lease
 ```
@@ -372,7 +372,7 @@ CREATED
  -> RAISING_SPINE_FOR_LETTER     spine 0.700
  -> POST_GRASP_ROUTE_RUNNING     carry both objects to the letter-side table
  -> LOWERING_SPINE_AT_LETTER     spine 0.468
- -> TEST_PLACE_RUNNING           touch down, open, close again, lift; keep them
+ -> TEST_PLACE_RUNNING           lower, pause, lift; keep both grippers closed
  -> RAISING_SPINE_FOR_RETURN     spine 0.700
  -> RETURN_ROUTE_RUNNING         drive back to the pick side
  -> PLACEMENT_ROUTE_RUNNING      left 0.85 m, align to far table leg, turn 90 deg
@@ -394,8 +394,8 @@ extrinsics in `configs/zed_pnp_calibration.json` were solved at **spine
 0.468 m**, which is why grasping always happens there; changing it requires
 re-calibration (`docs/ZED_PNP_CALIBRATION.md`).
 
-**Placement is the grasp in reverse.** `--mode test` descends, opens,
-**closes again** and lifts. `--mode final` descends, opens and lifts away
+**Placement is the grasp in reverse.** `--mode test` descends, pauses and lifts
+while **keeping the gripper closed throughout**. `--mode final` descends, opens and lifts away
 empty. X/Y always come from the arm's current pose, never the earlier grasp
 point; the base has driven elsewhere by then.
 
@@ -470,7 +470,7 @@ src/franka_duo_tele_data/   policy
   rgb20d_io.py, action_spec.py  20-D observation/action contract
 site/franka_duo_joint_servo/  ROS 2 pkg: KDL IK -> Ruckig -> impedance relay
 site/franka_duo_ptp_step/     ROS 2 pkg: homing utility (not on the mission path)
-base/tmr_cycle/             base-host routes (ROS 2 Humble): 07 outbound, 13 post-grasp,
+base/tmr_base/             base-host routes (ROS 2 Humble): 07 outbound, 13 post-grasp,
                             15 return, 20 placement detour, velocity adapter, leg detection
 base/tmr_navigation/        base-host adapter pkg: odom frame adapter, dual-LiDAR merger, SLAM launch
 hosts/arm/teleoperation_overlay/  our arm-side ROS 2 overlay incl. the JointImpedanceController

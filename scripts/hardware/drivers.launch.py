@@ -81,7 +81,7 @@ def generate_nodes(context):
                               name=f"ebim_{side}_tf", arguments=args + ["--frame-id", "base_link", "--child-frame-id", f"lidar_{side}"]))
         nodes.append(package_launch("slam_toolbox", "online_async_launch.py", use_sim_time="false",
                                     slam_params_file=root / "base/tmr_navigation/config/slam_toolbox.yaml"))
-        nodes.append(ExecuteProcess(cmd=["/usr/bin/python3", str(root / "base/tmr_cycle/scripts/cmd_vel_adapter.py")], output="screen"))
+        nodes.append(ExecuteProcess(cmd=["/usr/bin/python3", str(root / "base/tmr_base/scripts/cmd_vel_adapter.py")], output="screen"))
     else:
         raise ValueError(f"unknown host role: {role}")
     def exited(event, launch_context):

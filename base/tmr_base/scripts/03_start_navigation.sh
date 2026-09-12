@@ -333,7 +333,7 @@ main() {
     return 72
   fi
   rm -f "${ready_file}"
-  log_dir="${HOME}/tmr_cycle/logs/live_slam_$(date +%Y%m%d_%H%M%S)"
+  log_dir="${HOME}/tmr_base/logs/live_slam_$(date +%Y%m%d_%H%M%S)"
   mkdir -p "${log_dir}"
   {
     echo "ROS_DISTRO=${ROS_DISTRO:-unknown}"

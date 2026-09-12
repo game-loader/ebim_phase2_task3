@@ -165,7 +165,7 @@ must be reconciled explicitly before managed startup.
 Routes, navigation Python adapters, launch helpers, DDS profiles and calibration
 are deployed under `/app/runtime/releases/<content-hash>/` inside `.50`'s container. Existing
 vendor trees and shell startup files are not patched. No pre-existing
-`~/tmr_cycle` or compiled `~/tmr_navigation` is required. Arm runtime code is
+`~/tmr_base` or compiled `~/tmr_navigation` is required. Arm runtime code is
 already in the image and its release/state lives in `/app/runtime`.
 
 Docker volumes `<container>-state` and `<container>-outputs` persist logs and
@@ -244,7 +244,7 @@ transitive dependencies resolved through the normal PyPI index.
 Verification ran in disposable containers with `--network none`, without
 hardware device mappings or host workspaces:
 
-- 255 policy and base-route tests passed (`selftest /app/base/tmr_cycle/tests`).
+- 255 policy and base-route tests passed.
 - Both seven-joint KDL solvers passed three FK/IK round trips each (`model-check`).
 - Five driver plugins resolved their shared-library symbols; dual FR3v2 and
   Robotiq xacros, controller parameters, executables and Spine imports passed.
@@ -255,6 +255,9 @@ hardware device mappings or host workspaces:
 Build and verification logs are in
 `/home/aup/ebim_phase2_builds/f1ea686/` on `.100` (`build.log` and
 `offline-verify.log`); the directory name predates the build fixes.
+
+This recorded image predates the source directory rename to `base/tmr_base`.
+Rebuild the image to include the renamed directory and updated startup paths.
 
 The ARM64 base image has **not yet been built**. Its build-time checks and
 Jetson GPU/USB access remain unverified. Neither host's hardware drivers were

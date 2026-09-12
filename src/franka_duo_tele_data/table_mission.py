@@ -25,7 +25,7 @@ height the camera was calibrated for while working.
 
 Each table stage lowers the spine, clears the camera view, detects and grasps
 (see ``table_grasp_stage``).  The objects are then carried to the letter side,
-set down there without being given up (``--mode test``: touch, open, close,
+lowered there with the grippers held closed (``--mode test``: lower, pause,
 lift), carried back, and finally left on the step-20 placement table
 (``--mode final``).  See ``table_place_stage``.
 
@@ -314,7 +314,11 @@ def place_report_is_stable(report: dict | None, mode: str) -> bool:
         return False
     if not isinstance(report.get("place"), dict):
         return False
-    return report.get("regrasp") is (mode == "test")
+    return (
+        mode in ("test", "final")
+        and report.get("mode") == mode
+        and report.get("release_gripper") is (mode == "final")
+    )
 
 
 def stage_report_is_stable(report: dict | None) -> bool:
@@ -677,7 +681,7 @@ def strategy(config: MissionConfig, checkpoint_path: Path, args=None) -> dict:
             f"bowl stage: lower spine to {GRASP_HEIGHT_M:.3f} m, clear view, detect, pose up, grasp",
             f"raise spine to {TRAVEL_HEIGHT_M:.3f} m, then carry both objects to the letter side",
             f"lower spine to {GRASP_HEIGHT_M:.3f} m at the letter table",
-            "test placement: touch the letter table, open, close again and lift each object",
+            "test placement: lower to letter-table height, keep grippers closed and lift each object",
             f"raise spine to {TRAVEL_HEIGHT_M:.3f} m, then drive back to the pickup side",
             "step-20 route: left 0.85 m, align with the far leg, turn, await placement",
             f"lower spine to {GRASP_HEIGHT_M:.3f} m at the placement table",
@@ -833,7 +837,7 @@ def run_mission(config: MissionConfig, args) -> int:
         set_phase(Phase.AT_LETTER_TABLE, post_grasp_report=post_grasp_report)
         time.sleep(max(0.0, min(0.5, config.transition_settle_s)))
 
-        # Touch the letter table, then pick the objects straight back up.
+        # Lower to letter-table height and lift again without releasing either object.
         test_reports = place_all(
             Phase.TEST_PLACE_RUNNING, "test_place", "test", args.letter_table_z
         )
@@ -892,7 +896,7 @@ def main(argv=None) -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--base-host", default="tmr-user@172.16.0.50")
-    parser.add_argument("--base-root", default="/home/tmr-user/tmr_cycle")
+    parser.add_argument("--base-root", default="/home/tmr-user/tmr_base")
     parser.add_argument("--base-env", default="", help="deployed base environment file; empty uses legacy host workspaces")
     parser.add_argument("--base-container", default="", help="base Docker container name")
     parser.add_argument("--base-release", default="", help="base runtime release identifier")

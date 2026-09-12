@@ -282,7 +282,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--state-file",
         type=Path,
-        default=Path("~/tmr_cycle/state/return_from_letter.json").expanduser(),
+        default=Path("~/tmr_base/state/return_from_letter.json").expanduser(),
     )
     args = parser.parse_args()
     if not 0.0 <= args.left_m <= 2.40:

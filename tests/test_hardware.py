@@ -48,7 +48,7 @@ def test_bundle_includes_executable_routes_and_no_host_navigation_install(config
     with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as tar:
         names = tar.getnames()
         for name in ("07_start_to_pickup.py", "13_post_grasp_route.py", "15_return_from_letter.py", "20_after_return_placement.py"):
-            assert "base/tmr_cycle/scripts/" + name in names
+            assert "base/tmr_base/scripts/" + name in names
         assert "base/tmr_navigation/tmr_local_navigation/odom_frame_adapter.py" in names
         assert "scripts/hardware/franka.launch.py" in names
         assert not any("__pycache__" in name for name in names)
@@ -57,7 +57,7 @@ def test_bundle_includes_executable_routes_and_no_host_navigation_install(config
         assert "ROS_DOMAIN_ID=97" in env
         assert "dds_base.xml" in env
     assert release_id(files) == release_id(bundle_files(config))
-    files["base/tmr_cycle/scripts/07_start_to_pickup.py"] += b"\n"
+    files["base/tmr_base/scripts/07_start_to_pickup.py"] += b"\n"
     assert release_id(files) != release_id(bundle_files(config))
 
 
@@ -196,12 +196,12 @@ def test_actual_archive_deployment_is_versioned_and_repeatable(config, tmp_path)
         load_helper("deploy").deploy(tmp_path / "base", orchestrator.release, payload)
     orchestrator.base_docker = local_base_deploy
     orchestrator.deploy()
-    route = tmp_path / "base/releases" / orchestrator.release / "base/tmr_cycle/scripts/07_start_to_pickup.py"
-    assert route.read_bytes() == (ROOT / "base/tmr_cycle/scripts/07_start_to_pickup.py").read_bytes()
+    route = tmp_path / "base/releases" / orchestrator.release / "base/tmr_base/scripts/07_start_to_pickup.py"
+    assert route.read_bytes() == (ROOT / "base/tmr_base/scripts/07_start_to_pickup.py").read_bytes()
     initial_mtime = route.stat().st_mtime_ns
     orchestrator.deploy()
     assert route.stat().st_mtime_ns == initial_mtime
-    assert not (tmp_path / "base/tmr_cycle").exists()
+    assert not (tmp_path / "base/tmr_base").exists()
 
 
 def test_start_servo_checks_controller_state_before_starting_targets(config, tmp_path, monkeypatch):

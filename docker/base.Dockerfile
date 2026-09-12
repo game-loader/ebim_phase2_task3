@@ -41,6 +41,6 @@ COPY THIRD_PARTY_NOTICES.md /app/
 RUN chmod +x /app/docker/base_entrypoint.sh \
     && source /opt/ros/humble/setup.bash && source /opt/ebim-base/install/setup.bash \
     && python3 /app/docker/check_base_assets.py \
-    && python3 -m pytest /app/base/tmr_cycle/tests -q
+    && python3 -m pytest /app/base/tmr_base/tests -q
 ENTRYPOINT ["/usr/bin/tini", "--", "/app/docker/base_entrypoint.sh"]
 CMD ["keep"]

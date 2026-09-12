@@ -289,7 +289,7 @@ def main() -> int:
     )
     parser.add_argument("--linear-speed-mps", type=float, default=0.08)
     parser.add_argument("--angular-speed-rps", type=float, default=0.18)
-    parser.add_argument("--state-file", type=Path, default=Path("~/tmr_cycle/state/post_grasp_route.json").expanduser())
+    parser.add_argument("--state-file", type=Path, default=Path("~/tmr_base/state/post_grasp_route.json").expanduser())
     args = parser.parse_args()
     stages = confirmed_stages(
         args.retreat_m,

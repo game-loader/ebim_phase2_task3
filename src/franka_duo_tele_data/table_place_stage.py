@@ -4,9 +4,8 @@ Two modes, both driven through the joint servo into the site
 ``joint_impedance_controller`` -- the same path the grasp uses, never PTP:
 
 ``--mode test``
-    Touch the table, open, close again and lift the object back up.  Used at the
-    letter-search end point, where the object must reach the table but is then
-    carried onward.
+    Lower to table height, pause and lift the object back up while keeping the
+    gripper closed throughout. Used at the letter-side stop before carrying on.
 
 ``--mode final``
     Touch the table, open and lift the empty gripper away, leaving the object
@@ -72,7 +71,7 @@ def plan_placement(
         step_m=limits.step_m,
         step_rad=limits.step_rad,
         settle_rows=limits.settle_rows,
-        regrasp=mode == "test",
+        release_gripper=mode == "final",
         margin_m=margin_m,
     )
     start_z = float(state[ARM_SLICE[arm]][2])
@@ -87,7 +86,7 @@ def plan_placement(
         "start_ee_z": start_z,
         "placement_ee_z": float(table_z) + clearance + float(margin_m),
         "descent_m": start_z - (float(table_z) + clearance + float(margin_m)),
-        "regrasp": mode == "test",
+        "release_gripper": mode == "final",
         "first_row_ee_z": place_z,
     }
 
@@ -238,7 +237,7 @@ def main(argv=None) -> int:
         "--mode",
         choices=MODES,
         required=True,
-        help="test: touch, open, close, carry on. final: touch, open, leave it",
+        help="test: lower, hold closed, lift and carry on. final: touch, open, leave it",
     )
     parser.add_argument("--arm", choices=SIDES, required=True)
     parser.add_argument("--target", choices=("cup", "bowl"), default="cup")

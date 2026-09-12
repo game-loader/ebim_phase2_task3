@@ -84,7 +84,7 @@ def test_place_rows_respect_step_limits_and_the_contract():
 def test_final_mode_opens_and_leaves_the_object():
     state = held_state("right", ee_z=0.05)
     rows = build_place_rows(
-        state, "right", table_z=TABLE_Z, clearance_m=0.025, regrasp=False, open_rows=14
+        state, "right", table_z=TABLE_Z, clearance_m=0.025, release_gripper=True, open_rows=14
     )
     grip = rows[:, GRIPPER_INDEX["right"]]
     # Closed while descending, then opens and never closes again.
@@ -95,25 +95,34 @@ def test_final_mode_opens_and_leaves_the_object():
     assert np.all(grip[opened[0] :] == 1.0), "final placement must not re-close"
 
 
-def test_test_mode_opens_then_closes_and_carries_the_object_up():
-    state = held_state("right", ee_z=0.05)
-    rows = build_place_rows(
-        state, "right", table_z=TABLE_Z, clearance_m=0.025, regrasp=True, open_rows=14, close_rows=14
+@pytest.mark.parametrize("arm", ["left", "right"])
+@pytest.mark.parametrize("height,depth", [(CUP_HEIGHT, CUP_DEPTH), (0.045, 0.025)])
+@pytest.mark.parametrize("mode", ["test", "final"])
+def test_placement_release_is_only_allowed_in_final_mode(arm, height, depth, mode):
+    state = held_state(arm, ee_z=0.05)
+    state[18:] = 0.0  # Both arms are carrying objects.
+    rows, geometry = plan_placement(
+        state, arm, mode=mode, table_z=TABLE_Z,
+        object_height_m=height, grasp_depth_m=depth, lift_m=0.10,
+        limits=ApproachLimits(),
     )
-    grip = rows[:, GRIPPER_INDEX["right"]]
-    sl = ARM_SLICE["right"]
+    grip = rows[:, GRIPPER_INDEX[arm]]
+    sl = ARM_SLICE[arm]
     assert grip[0] == 0.0
-    opened = np.where(grip == 1.0)[0]
-    assert len(opened) >= 14
-    # After opening it closes again and stays closed while lifting.
-    assert grip[-1] == 0.0, "test placement must re-grasp before lifting"
-    assert np.all(grip[opened[-1] + 1 :] == 0.0)
-    # The gripper only ever opens at the table plane, never in mid-air.
-    place_z = TABLE_Z + 0.025
-    for index in opened:
-        assert rows[index][sl][2] == pytest.approx(place_z, abs=1e-6)
-    # It ends lifted back up, carrying the object.
-    assert float(rows[-1][sl][2]) > place_z + 0.05
+    place_z = TABLE_Z + height - depth
+    assert min(rows[:, sl.start + 2]) == pytest.approx(place_z, abs=1e-6)
+    assert float(rows[-1][sl][2]) == pytest.approx(place_z + 0.10, abs=1e-6)
+    other = "left" if arm == "right" else "right"
+    assert np.all(rows[:, GRIPPER_INDEX[other]] == 0.0)
+    assert np.allclose(rows[:, ARM_SLICE[other]], state[ARM_SLICE[other]])
+    assert geometry["release_gripper"] is (mode == "final")
+    if mode == "test":
+        assert np.all(grip == 0.0), "test placement must never release the object"
+    else:
+        opened = np.where(grip == 1.0)[0]
+        assert len(opened) >= 14
+        assert rows[opened[0]][sl][2] == pytest.approx(place_z, abs=1e-6)
+        assert np.all(grip[opened[0]:] == 1.0)
 
 
 def test_place_rows_reject_a_target_above_the_current_pose():
@@ -152,7 +161,7 @@ def test_plan_placement_reports_geometry_and_honours_margin():
         limits=ApproachLimits(),
         margin_m=0.005,
     )
-    assert geometry["regrasp"] is True
+    assert geometry["release_gripper"] is False
     assert geometry["release_clearance_m"] == pytest.approx(0.025)
     # Table + object-below-EE + margin.
     assert geometry["placement_ee_z"] == pytest.approx(TABLE_Z + 0.025 + 0.005)
@@ -170,7 +179,7 @@ def test_plan_placement_reports_geometry_and_honours_margin():
         lift_m=0.10,
         limits=ApproachLimits(),
     )
-    assert final_geometry["regrasp"] is False
+    assert final_geometry["release_gripper"] is True
 
 
 def test_plan_placement_rejects_an_unknown_mode():

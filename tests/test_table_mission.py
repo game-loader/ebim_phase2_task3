@@ -39,7 +39,7 @@ from franka_duo_tele_data.table_mission import (
 def config(**overrides) -> MissionConfig:
     values = {
         "base_host": "tmr-user@172.16.0.50",
-        "base_root": "/home/tmr-user/tmr_cycle",
+        "base_root": "/home/tmr-user/tmr_base",
         "arm_root": "/home/aup/franka_duo_tele_data",
         "arm_env": "/home/aup/tmr_env.sh",
         "dataset": "datasets/franka_duo_lerobot_rgb20d_v1",
@@ -207,8 +207,8 @@ def test_route_and_placement_validators_match_each_script_contract():
 
 def test_place_report_must_match_the_requested_mode():
     """A test placement keeps the object; a final one gives it up."""
-    carried = {"status": "success", "place": {"rows": 40}, "regrasp": True}
-    released = {"status": "success", "place": {"rows": 40}, "regrasp": False}
+    carried = {"status": "success", "place": {"rows": 40}, "mode": "test", "release_gripper": False}
+    released = {"status": "success", "place": {"rows": 40}, "mode": "final", "release_gripper": True}
     assert place_report_is_stable(carried, "test")
     assert place_report_is_stable(released, "final")
     # Reporting the wrong one means the object was left behind, or not left.
@@ -216,6 +216,8 @@ def test_place_report_must_match_the_requested_mode():
     assert not place_report_is_stable(carried, "final")
     assert not place_report_is_stable({**carried, "status": "failed"}, "test")
     assert not place_report_is_stable(None, "final")
+    assert not place_report_is_stable({**carried, "release_gripper": True}, "test")
+    assert not place_report_is_stable({"status": "success", "place": {"rows": 40}, "regrasp": True}, "test")
 
 
 def test_departed_phases_cover_everything_after_the_drive():

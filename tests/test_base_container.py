@@ -121,7 +121,7 @@ def test_missing_container_differs_from_docker_daemon_failure(config, monkeypatc
 
 
 def test_route_uses_heartbeat_client_and_container_environment():
-    config = MissionConfig(base_host="tmr-user@base", base_root="/app/runtime/release/base/tmr_cycle",
+    config = MissionConfig(base_host="tmr-user@base", base_root="/app/runtime/release/base/tmr_base",
                            arm_root="/app", arm_env="/opt/ros/jazzy/setup.bash", dataset="contract", speed=0.1,
                            init_timeout_s=1, outbound_timeout_s=1, stage_timeout_s=1, transition_settle_s=0,
                            base_env="/app/runtime/release/base_env.sh", base_container="base-container",

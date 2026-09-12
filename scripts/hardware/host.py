@@ -249,7 +249,7 @@ class Host:
         command = ["/app/entrypoint.sh", "mission",
                    "--calibration", str(self.release / "calibration.json"),
                    "--base-host", self.config["hosts"]["base"]["ssh"],
-                   "--base-root", base_root + "/base/tmr_cycle", "--base-env", env_file,
+                   "--base-root", base_root + "/base/tmr_base", "--base-env", env_file,
                    "--base-container", self.config["hosts"]["base"]["container"],
                    "--base-release", self.release.name,
                    "--speed", str(self.config["runtime"]["playback_speed"])]

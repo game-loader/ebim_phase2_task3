@@ -15,6 +15,6 @@ if [[ -f "${HOME}/cyclonedds.xml" ]]; then
 fi
 set -u
 
-cd "${HOME}/tmr_cycle"
+cd "${HOME}/tmr_base"
 exec flock -n /tmp/tmr_post_grasp_route.lock \
   python3 scripts/13_post_grasp_route.py "$@"

@@ -121,7 +121,7 @@ def dds_xml(address: str) -> str:
 
 def bundle_files(config: dict) -> dict[str, bytes]:
     files = {}
-    for tree in ("base/tmr_cycle/scripts", "base/tmr_cycle/config", "base/tmr_navigation/tmr_local_navigation",
+    for tree in ("base/tmr_base/scripts", "base/tmr_base/config", "base/tmr_navigation/tmr_local_navigation",
                  "base/tmr_navigation/config", "scripts/hardware"):
         for path in sorted((ROOT / tree).rglob("*")):
             if path.is_file() and not path.is_symlink() and "__pycache__" not in path.parts:

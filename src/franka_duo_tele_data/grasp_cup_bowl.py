@@ -594,26 +594,25 @@ def build_place_rows(
     step_rad: float = 0.08,
     settle_rows: int = 6,
     open_rows: int = 14,
-    regrasp: bool = False,
-    close_rows: int = 14,
+    release_gripper: bool = True,
     margin_m: float = 0.0,
 ) -> np.ndarray:
-    """20D rows placing a held object: descend, open, optionally re-grasp, lift.
+    """20D rows placing a held object: descend, optionally release, lift.
 
     The mirror image of :func:`build_grasp_rows`.  X/Y come from the arm's
     current pose, never from an earlier grasp point: the base has usually driven
     somewhere else by the time an object is put down, so a stored X/Y would send
     the arm to the wrong place.  Only z changes on the way down.
 
-    With ``regrasp`` the gripper closes again after opening and lifts the object
-    back up -- the object touches the table but is carried onward.
+    With ``release_gripper=False`` the gripper stays closed for every row,
+    including the dwell at table height and the lift back up.
     """
     if arm not in SIDES:
         raise ValueError("arm must be left or right")
     if lift_m <= 0 or step_m <= 0 or step_rad <= 0:
         raise ValueError("lift and step limits must be positive")
-    if settle_rows < 0 or open_rows < 1 or close_rows < 1:
-        raise ValueError("open and close dwells must be at least one row")
+    if settle_rows < 0 or open_rows < 1:
+        raise ValueError("settle dwell must be nonnegative and open dwell at least one row")
     sl = ARM_SLICE[arm]
     pos0 = state[sl][:3].astype(np.float64)
     rot0 = state[sl][3:9].astype(np.float64)
@@ -632,11 +631,10 @@ def build_place_rows(
     for p, r in _segment(pos0, place_pos, rot0, rot0, step_m, step_rad):
         poses.append((p, r, closed_value))
     poses += [(place_pos, rot0, closed_value)] * settle_rows
-    poses += [(place_pos, rot0, open_value)] * open_rows
-    carried = open_value
-    if regrasp:
-        poses += [(place_pos, rot0, closed_value)] * close_rows
-        carried = closed_value
+    carried = closed_value
+    if release_gripper:
+        poses += [(place_pos, rot0, open_value)] * open_rows
+        carried = open_value
     for p, r in _segment(place_pos, lifted, rot0, rot0, step_m, step_rad):
         poses.append((p, r, carried))
 

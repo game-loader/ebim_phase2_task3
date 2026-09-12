@@ -48,7 +48,7 @@ ensure_cmd_adapter() {
   fi
   screen -S tmr_cmd_adapter -X quit >/dev/null 2>&1 || true
   screen -dmS tmr_cmd_adapter /bin/bash -c \
-    "source /opt/ros/humble/setup.bash && source ${HOME}/ros2_ws/install/setup.bash && export ROS_DOMAIN_ID=${ROS_DOMAIN_ID} ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY} RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION} CYCLONEDDS_URI=${CYCLONEDDS_URI:-} && cd ${HOME}/tmr_cycle && exec python3 scripts/cmd_vel_adapter.py"
+    "source /opt/ros/humble/setup.bash && source ${HOME}/ros2_ws/install/setup.bash && export ROS_DOMAIN_ID=${ROS_DOMAIN_ID} ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY} RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION} CYCLONEDDS_URI=${CYCLONEDDS_URI:-} && cd ${HOME}/tmr_base && exec python3 scripts/cmd_vel_adapter.py"
   sleep 1
 }
 
