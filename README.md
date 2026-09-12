@@ -62,7 +62,9 @@ is separate. Existing unmanaged drivers are reported as conflicts. The manual
 bring-up instructions below remain available as a legacy deployment path.
 Without Pixi use `bash scripts/docker_hardware.sh <command>`. For startup plus
 the physical mission use `pixi run run --execute`; stop with `pixi run down`.
-Both image builds and physical validation are still pending.
+The AMD64 arm image was built and verified offline on `.100` on 2026-09-12
+(`franka-duo-table-mission:a33d17b`, 255 tests passed). The ARM64 base image
+build and physical validation remain pending; see the linked validation record.
 
 ### Cell assumptions
 

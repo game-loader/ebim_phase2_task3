@@ -204,7 +204,7 @@ merging upstream duplicate YAML root mappings without changing their values.
 Its offline checks exercise the real TMR xacro, installed executables/libraries,
 SDK version and route tests. No hardware nodes are started during the build.
 
-Build commands, for a later authorized build on the corresponding architectures:
+Build commands on the corresponding architectures:
 
 ```bash
 # AMD64 builder
@@ -216,7 +216,49 @@ docker build --platform linux/arm64 -f docker/base.Dockerfile -t franka-duo-base
 若构建机访问 GitHub 较慢，可临时增加
 `--build-arg GIT_PROXY=https://gh-proxy.org`；锁定的仓库地址和提交不会改变。
 
-The implementation has offline unit coverage. Neither complete image has
-**yet been built**, so build-time checks, driver ABI compatibility, GPU/USB
-access and physical operation remain unverified. No deployment, hardware
-startup or target-host modification was performed during this implementation.
+### Arm image verified on 2026-09-12
+
+The AMD64 image was built on the `.100` arm host from commit `a33d17b` and
+tagged `franka-duo-table-mission:a33d17b`. All 398 tracked source files in the
+isolated remote build directory were checked against local SHA-256 hashes.
+The image ID is
+`sha256:c9d0b1e16d21957e6e6eb5b866c61f71489f6293a69ae6159dbeff676a771538`;
+Docker reports 6.13 GB local disk usage. The default `:phase2` tag was not set;
+set `hardware.yaml`'s top-level `image` to the verified tag when using it.
+
+The build used these temporary arguments (host package sources were unchanged):
+
+```bash
+--build-arg UBUNTU_APT_MIRROR=https://mirrors.ustc.edu.cn/ubuntu/ \
+--build-arg ROS_APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/ros2/ubuntu \
+--build-arg GIT_PROXY=https://gh-proxy.org \
+--build-arg PIP_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+```
+
+The 15 vendor/overlay packages and the joint servo compiled successfully.
+`realtime_tools` comes from Jazzy alongside its `ros2_control` binaries; the
+older vendor copy must not shadow that ABI. Torch `2.8.0+cpu` and torchvision
+`0.23.0+cpu` are installed separately from the CPU wheel index, with their
+transitive dependencies resolved through the normal PyPI index.
+
+Verification ran in disposable containers with `--network none`, without
+hardware device mappings or host workspaces:
+
+- 255 policy and base-route tests passed (`selftest /app/base/tmr_cycle/tests`).
+- Both seven-joint KDL solvers passed three FK/IK round trips each (`model-check`).
+- Five driver plugins resolved their shared-library symbols; dual FR3v2 and
+  Robotiq xacros, controller parameters, executables and Spine imports passed.
+- The bundled YOLO segmentation weights ran CPU inference on a synthetic RGB
+  frame; Torch reported no CUDA runtime, and ROS image/message imports passed.
+- `mission` and `hardware plan` printed their dry-run plans successfully.
+
+Build and verification logs are in
+`/home/aup/ebim_phase2_builds/f1ea686/` on `.100` (`build.log` and
+`offline-verify.log`); the directory name predates the build fixes.
+
+The ARM64 base image has **not yet been built**. Its build-time checks and
+Jetson GPU/USB access remain unverified. Neither host's hardware drivers were
+started, and DDS communication, real-time control and physical operation still
+require hardware validation. Existing host installations and image tags were
+preserved; only the isolated build directory, build cache and new image tags
+were added on `.100`.
