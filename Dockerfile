@@ -84,7 +84,11 @@ ARG PIP_INDEX_URL=https://pypi.org/simple
 RUN python3 -m venv --system-site-packages /app/.venv \
     && /app/.venv/bin/pip install --upgrade pip \
     && /app/.venv/bin/pip install \
-         --extra-index-url https://download.pytorch.org/whl/cpu \
+         --index-url https://download.pytorch.org/whl/cpu --no-deps \
+         "torch==2.8.0+cpu" \
+         "torchvision==0.23.0+cpu"
+# Resolve their transitive dependencies through the normal index as well.
+RUN /app/.venv/bin/pip install \
          "torch==2.8.0+cpu" \
          "torchvision==0.23.0+cpu" \
          "numpy>=1.23.5,<2.3.0" \
