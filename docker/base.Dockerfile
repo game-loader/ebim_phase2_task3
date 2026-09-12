@@ -6,14 +6,22 @@ SHELL ["/bin/bash", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive ROS_DISTRO=humble LANG=C.UTF-8 LC_ALL=C.UTF-8 \
     PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 ARG GIT_PROXY=
+ARG UBUNTU_APT_MIRROR=
+ARG ROS_APT_MIRROR=
 ENV EBIM_GIT_PROXY=${GIT_PROXY}
 USER root
 RUN test "$(dpkg --print-architecture)" = arm64 \
+    && if [[ -n "${UBUNTU_APT_MIRROR}" ]] && [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then \
+         sed -i -E "s#https?://(archive|security).ubuntu.com/ubuntu/?#${UBUNTU_APT_MIRROR}#g" /etc/apt/sources.list.d/ubuntu.sources; \
+       fi \
     && apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
     && curl -fsSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
        -o /usr/share/keyrings/ros-archive-keyring.gpg \
     && echo 'deb [arch=arm64 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://packages.ros.org/ros2/ubuntu jammy main' \
        > /etc/apt/sources.list.d/ros2.list \
+    && if [[ -n "${ROS_APT_MIRROR}" ]]; then \
+         sed -i "s#https://packages.ros.org/ros2/ubuntu#${ROS_APT_MIRROR}#g" /etc/apt/sources.list.d/ros2.list; \
+       fi \
     && apt-get update && apt-get install -y --no-install-recommends \
        ros-humble-ros-base python3-colcon-common-extensions python3-yaml python3-numpy \
        python3-opencv python3-requests python3-pytest python3-setuptools \
