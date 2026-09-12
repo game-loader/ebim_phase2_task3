@@ -11,13 +11,14 @@ cmake --install /tmp/ebim-libfranka-build
 export CMAKE_PREFIX_PATH="/opt/ebim-libfranka:${CMAKE_PREFIX_PATH}"
 export LD_LIBRARY_PATH="/opt/ebim-libfranka/lib:${LD_LIBRARY_PATH:-}"
 # Explicit base paths avoid optional GUI, simulation, mobile and teleoperation packages.
+# Use Jazzy's realtime_tools with its ros2_control binaries; the vendor copy
+# shadows that library and lacks symbols required by newer Jazzy releases.
 colcon --log-base /tmp/ebim-driver-log build \
   --base-paths \
     "$vendor/franka_description" "$vendor/serial" \
     "$vendor/ros2_robotiq_gripper/robotiq_description" \
     "$vendor/ros2_robotiq_gripper/robotiq_driver" \
     "$vendor/ros2_robotiq_gripper/robotiq_controllers" \
-    "$vendor/franka_ros2/realtime_tools/realtime_tools" \
     "$vendor/franka_ros2/franka_msgs" \
     "$vendor/franka_ros2/franka_semantic_components" \
     "$vendor/franka_ros2/franka_hardware" \
