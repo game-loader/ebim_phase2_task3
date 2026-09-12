@@ -1,6 +1,7 @@
 # Jetson Orin base/camera image. Build for linux/arm64 on L4T R36.4.
 # ZED SDK 5.1.2 + CUDA 12.6 match the inspected .50 host.
-FROM stereolabs/zed:5.1.2-devel-l4t-r36.4@sha256:a194acb35508f920588d77c462cb127d199f337e9149349434cdf115e581bcda
+ARG BASE_IMAGE=stereolabs/zed:5.1.2-devel-l4t-r36.4@sha256:a194acb35508f920588d77c462cb127d199f337e9149349434cdf115e581bcda
+FROM ${BASE_IMAGE}
 LABEL io.ebim.hardware.schema="3" io.ebim.role="base"
 SHELL ["/bin/bash", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive ROS_DISTRO=humble LANG=C.UTF-8 LC_ALL=C.UTF-8 \
@@ -11,8 +12,12 @@ ARG ROS_APT_MIRROR=
 ENV EBIM_GIT_PROXY=${GIT_PROXY}
 USER root
 RUN test "$(dpkg --print-architecture)" = arm64 \
-    && if [[ -n "${UBUNTU_APT_MIRROR}" ]] && [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then \
-         sed -i -E "s#https?://(archive|security).ubuntu.com/ubuntu/?#${UBUNTU_APT_MIRROR}#g" /etc/apt/sources.list.d/ubuntu.sources; \
+    && if [[ -n "${UBUNTU_APT_MIRROR}" ]]; then \
+         for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do \
+           if [[ -f "${source_file}" ]]; then \
+             sed -i -E "s#https?://ports.ubuntu.com/ubuntu-ports/?#${UBUNTU_APT_MIRROR%/}/#g" "${source_file}"; \
+           fi; \
+         done; \
        fi \
     && apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
     && curl -fsSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \

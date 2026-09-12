@@ -216,6 +216,26 @@ docker build --platform linux/arm64 -f docker/base.Dockerfile -t franka-duo-base
 若构建机访问 GitHub 较慢，可临时增加
 `--build-arg GIT_PROXY=https://gh-proxy.org`；锁定的仓库地址和提交不会改变。
 
+On Jetson, the Ubuntu mirror must serve **ubuntu-ports** (ARM64):
+
+```bash
+docker build --network host --platform linux/arm64 -f docker/base.Dockerfile \
+  --build-arg UBUNTU_APT_MIRROR=https://mirrors.ustc.edu.cn/ubuntu-ports/ \
+  --build-arg ROS_APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/ros2/ubuntu \
+  --build-arg GIT_PROXY=https://gh-proxy.org \
+  -t franka-duo-base:phase2 .
+```
+
+`--network host` also avoids Docker bridge creation on Jetson kernels without
+the iptables raw table. It changes build networking only, not host firewall rules.
+For an offline transfer, pull the pinned ZED digest on an ARM64-capable builder,
+tag it, and stream `docker save` into `ssh <base-host> docker load` (optionally
+compressing the stream). This avoids storing an extra archive on the Jetson.
+Docker save/load can lose the registry digest; after confirming the imported
+image ID is `sha256:59421aba196373f6c32943d7b7aac2547559222d759269011d7d6385d7d0fc81`,
+add `--build-arg BASE_IMAGE=stereolabs/zed:5.1.2-devel-l4t-r36.4` to use it locally.
+The default build continues to pin the registry digest.
+
 ### Arm image verified on 2026-09-12
 
 The AMD64 image was built on the `.100` arm host from commit `a33d17b` and
