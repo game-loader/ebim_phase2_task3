@@ -213,6 +213,9 @@ docker build --platform linux/amd64 -t franka-duo-table-mission:phase2 .
 docker build --platform linux/arm64 -f docker/base.Dockerfile -t franka-duo-base:phase2 .
 ```
 
+若构建机访问 GitHub 较慢，可临时增加
+`--build-arg GIT_PROXY=https://gh-proxy.org`；锁定的仓库地址和提交不会改变。
+
 The implementation has offline unit coverage. Neither complete image has
 **yet been built**, so build-time checks, driver ABI compatibility, GPU/USB
 access and physical operation remain unverified. No deployment, hardware

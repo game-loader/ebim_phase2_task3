@@ -5,6 +5,8 @@ LABEL io.ebim.hardware.schema="3" io.ebim.role="base"
 SHELL ["/bin/bash", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive ROS_DISTRO=humble LANG=C.UTF-8 LC_ALL=C.UTF-8 \
     PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ARG GIT_PROXY=
+ENV EBIM_GIT_PROXY=${GIT_PROXY}
 USER root
 RUN test "$(dpkg --print-architecture)" = arm64 \
     && apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \

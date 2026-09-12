@@ -5,6 +5,12 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import os
+
+
+def clone_url(url):
+    proxy = os.environ.get("EBIM_GIT_PROXY", "").rstrip("/")
+    return proxy + "/" + url if proxy and url.startswith("https://github.com/") else url
 
 
 def fetch(lock, destination):
@@ -16,7 +22,7 @@ def fetch(lock, destination):
         def git(*args):
             return subprocess.check_output(["git", "-C", str(target), *args], text=True)
         git("init")
-        git("remote", "add", "origin", source["url"])
+        git("remote", "add", "origin", clone_url(source["url"]))
         git("fetch", "--depth", "1", "origin", source["commit"])
         git("checkout", "--detach", "FETCH_HEAD")
         if git("rev-parse", "HEAD").strip() != source["commit"]:

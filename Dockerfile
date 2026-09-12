@@ -11,6 +11,8 @@ LABEL io.ebim.hardware.schema="3" io.ebim.role="arm"
 
 ARG UBUNTU_APT_MIRROR=
 ARG ROS_APT_MIRROR=
+ARG GIT_PROXY=
+ENV EBIM_GIT_PROXY=${GIT_PROXY}
 
 SHELL ["/bin/bash", "-lc"]
 ENV DEBIAN_FRONTEND=noninteractive \
