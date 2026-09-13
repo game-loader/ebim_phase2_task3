@@ -7,7 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake python3-colcon-common-extensions python3-pip python3-venv \
       python3-yaml python3-numpy iproute2 util-linux tini libglib2.0-0 libgl1 \
-      ros-humble-rmw-cyclonedds-cpp ros-humble-ament-cmake-python \
+      ros-humble-rmw-fastrtps-cpp ros-humble-ament-cmake-python \
       ros-humble-eigen3-cmake-module ros-humble-moveit-core \
       ros-humble-moveit-ros-planning ros-humble-moveit-kinematics ros-humble-ruckig \
       ros-humble-controller-manager-msgs ros-humble-control-msgs \
@@ -40,6 +40,8 @@ RUN source /opt/ros/humble/setup.bash \
     && rm -rf /tmp/ebim-build /tmp/ebim-log
 COPY . /app/
 ENV PYTHONPATH=/app/src \
+    RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+    EBIM_ROS_GATEWAY=/app/runtime/ros.sock \
     EBIM_EXTERNAL_HARDWARE=1 \
     YOLO_OFFLINE=1 ULTRALYTICS_OFFLINE=1 YOLO_CONFIG_DIR=/app/.ultralytics \
     MPLCONFIGDIR=/tmp/mpl \

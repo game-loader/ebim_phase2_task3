@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 
-import rclpy
+from franka_duo_tele_data.ros_backend import ros as rclpy
 from controller_manager_msgs.srv import ListControllers
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid, Odometry
@@ -119,7 +119,7 @@ class Probe:
             self.wait(lambda: self.client("/franka_spine_node/" + name, kind).service_is_ready(), "spine " + name)
         from franka_spine_msgs.action import MoveAbsolute
         from control_msgs.action import GripperCommand
-        from rclpy.action import ActionClient
+        from franka_duo_tele_data.ros_backend import ActionClient
         for name, kind in [("/franka_spine_node/move_absolute", MoveAbsolute)] + [
             (f"/{side}/gripper/robotiq_gripper_controller/gripper_cmd", GripperCommand) for side in SIDES
         ]:

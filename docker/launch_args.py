@@ -19,8 +19,6 @@ def launch_args(profile, image, ssh_dir, name, operation, activate=False):
     config = load_hardware(profile, require_calibration=False)
     if config["image"] != image:
         raise ValueError("set EBIM_IMAGE to the same image reference as hardware.yaml")
-    if activate and config["deployment"] == "external":
-        raise ValueError("external mode requires operator handoff; use up without --activate, then mission --execute")
     args = ["run", "--pull", "never", "--network", "none" if operation == "plan" else "host", "--ipc", "private",
             "--cap-add", "SYS_NICE", "--cap-add", "IPC_LOCK",
             "--ulimit", "rtprio=99:99", "--ulimit", "memlock=-1:-1", "--shm-size", "256m"]

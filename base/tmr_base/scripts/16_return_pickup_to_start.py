@@ -61,7 +61,7 @@ def main() -> int:
         raise RuntimeError(f"state file exists; refuse accidental replay: {args.state_file}")
 
     motion = load_motion_module()
-    import rclpy
+    from ros_backend import ros as rclpy
 
     state = {"status": "running", "next_stage": 0, "reports": []}
     write_state(args.state_file, state)

@@ -427,7 +427,7 @@ def _dry_run_summary(cfg: dict, config_path: Path) -> dict:
 def run_ros_mission(cfg: dict) -> tuple[int, dict]:
     # ROS imports are intentionally delayed until --execute.  A local syntax/
     # configuration check cannot discover or command a robot by accident.
-    import rclpy
+    from ros_backend import ros as rclpy
     from action_msgs.msg import GoalStatusArray
     from nav_msgs.msg import OccupancyGrid
     from rclpy.duration import Duration

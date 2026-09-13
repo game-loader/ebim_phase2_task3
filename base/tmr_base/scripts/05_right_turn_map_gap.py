@@ -19,11 +19,11 @@ import json
 import math
 import time
 
-import rclpy
+from ros_backend import ros as rclpy
 from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry
 from rclpy.duration import Duration
-from rclpy.node import Node
+from ros_backend import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan

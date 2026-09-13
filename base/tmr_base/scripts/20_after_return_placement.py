@@ -180,7 +180,7 @@ def load_motion():
 
 
 def create_node(expected_frame, expected_session):
-    import rclpy
+    from ros_backend import ros as rclpy
 
     motion = load_motion()
 
@@ -429,7 +429,7 @@ def execute(args):
         node.stop(30)
         node.destroy_node()
         node = None
-        import rclpy
+        from ros_backend import ros as rclpy
 
         rclpy.shutdown()
         if args.phase == "return" and not args.stop_at_pickup:
@@ -451,7 +451,7 @@ def execute(args):
     finally:
         if node is not None:
             node.destroy_node()
-            import rclpy
+            from ros_backend import ros as rclpy
 
             if rclpy.ok():
                 rclpy.shutdown()

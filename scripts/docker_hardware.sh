@@ -36,6 +36,11 @@ owned() {
   [[ "$label" == arm ]] || { echo "Refusing unrelated container: $name" >&2; exit 1; }
 }
 inside() { docker exec "$name" /app/entrypoint.sh hardware "$@"; }
+if [[ "$operation" == check ]] && docker container inspect "$name" >/dev/null 2>&1; then
+  owned
+  inside check
+  exit 0
+fi
 case "$operation" in
   status|logs|mission|down)
     owned

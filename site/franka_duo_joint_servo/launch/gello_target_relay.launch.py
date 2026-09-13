@@ -27,6 +27,7 @@ def generate_launch_description() -> LaunchDescription:
                         "expected_joint_names": [f"{side}_fr3v2_joint{i}" for i in range(1, 8)],
                         "enable_robot": enable_robot,
                         "enable_gripper": enable_gripper,
+                        "output_rate_hz": ParameterValue(LaunchConfiguration("output_rate_hz"), value_type=float),
                     }
                 ],
             )
@@ -35,6 +36,7 @@ def generate_launch_description() -> LaunchDescription:
         [
             DeclareLaunchArgument("enable_robot", default_value="false"),
             DeclareLaunchArgument("enable_gripper", default_value="false"),
+            DeclareLaunchArgument("output_rate_hz", default_value="0.0"),
             *nodes,
         ]
     )

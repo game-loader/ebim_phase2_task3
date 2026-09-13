@@ -33,6 +33,7 @@ class GelloTargetRelay final : public rclcpp::Node {
     // servo stops publishing, keep re-sending the last forwarded target with
     // a fresh stamp so the arm holds its pose instead of losing the driver.
     declare_parameter<bool>("hold_on_input_loss", true);
+    declare_parameter<double>("output_rate_hz", 0.0);
 
     input_topic_ = get_parameter("input_topic").as_string();
     output_topic_ = get_parameter("output_topic").as_string();
@@ -43,6 +44,11 @@ class GelloTargetRelay final : public rclcpp::Node {
     enable_robot_ = get_parameter("enable_robot").as_bool();
     enable_gripper_ = get_parameter("enable_gripper").as_bool();
     hold_on_input_loss_ = get_parameter("hold_on_input_loss").as_bool();
+    output_rate_hz_ = get_parameter("output_rate_hz").as_double();
+    if (!std::isfinite(output_rate_hz_) || output_rate_hz_ < 0.0 ||
+        (output_rate_hz_ > 0.0 && output_rate_hz_ < 10.0)) {
+      throw std::invalid_argument("output_rate_hz must be zero (passthrough) or at least 10 Hz");
+    }
     if (input_topic_.empty() || output_topic_.empty() || expected_joint_names_.size() != 7U) {
       throw std::invalid_argument(
           "input_topic, output_topic and seven expected_joint_names are required");
@@ -71,7 +77,15 @@ class GelloTargetRelay final : public rclcpp::Node {
     if (enable_robot_) {
       RCLCPP_WARN(get_logger(), "Robot output ENABLED: targets reach the joint impedance controller");
     }
-    if (hold_on_input_loss_) {
+    if (output_rate_hz_ > 0) {
+      hold_timer_ = create_wall_timer(std::chrono::duration<double>(1.0 / output_rate_hz_), [this] {
+        if (enable_robot_ && have_last_) {
+          auto held = last_forwarded_;
+          held.header.stamp = now();
+          publisher_->publish(held);
+        }
+      });
+    } else if (hold_on_input_loss_) {
       hold_timer_ = create_wall_timer(std::chrono::milliseconds(5), [this] { holdTick(); });
     }
   }
@@ -120,7 +134,9 @@ class GelloTargetRelay final : public rclcpp::Node {
           input_topic_.c_str());
       return;
     }
-    publisher_->publish(message);
+    if (output_rate_hz_ == 0.0) {
+      publisher_->publish(message);
+    }
     last_forwarded_ = message;
     last_forward_time_ = std::chrono::steady_clock::now();
     have_last_ = true;
@@ -144,6 +160,7 @@ class GelloTargetRelay final : public rclcpp::Node {
   bool enable_robot_{false};
   bool enable_gripper_{false};
   bool hold_on_input_loss_{true};
+  double output_rate_hz_{0.0};
   bool have_last_{false};
   sensor_msgs::msg::JointState last_forwarded_;
   std::chrono::steady_clock::time_point last_forward_time_{};

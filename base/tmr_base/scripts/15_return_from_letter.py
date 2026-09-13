@@ -195,7 +195,7 @@ def run(args: argparse.Namespace) -> dict:
 
     if not args.resume_door:
         motion = load_motion_module()
-        import rclpy
+        from ros_backend import ros as rclpy
 
         rclpy.init()
         node = None

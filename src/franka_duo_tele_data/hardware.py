@@ -141,6 +141,19 @@ def dds_xml(address: str) -> str:
     return ET.tostring(root, encoding="unicode")
 
 
+def fastdds_xml(address: str) -> str:
+    ET.register_namespace("", "http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles")
+    root = ET.parse(ROOT / "configs/hamburg/hamburg_fastdds_profile.xml").getroot()
+    namespace = {"dds": "http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles"}
+    whitelist = root.find(".//dds:interfaceWhiteList", namespace)
+    for child in list(whitelist):
+        whitelist.remove(child)
+    # 'auto' is resolved on the container host before any DDS participant starts.
+    for value in dict.fromkeys((address, "127.0.0.1")):
+        ET.SubElement(whitelist, "{" + namespace["dds"] + "}address").text = value
+    return ET.tostring(root, encoding="unicode")
+
+
 def bundle_files(config: dict) -> dict[str, bytes]:
     files = {}
     for tree in ("base/tmr_base/scripts", "base/tmr_base/config", "base/tmr_navigation/tmr_local_navigation",
@@ -155,7 +168,8 @@ def bundle_files(config: dict) -> dict[str, bytes]:
     for name in ("drivers.lock.json", "base_drivers.lock.json"):
         files["docker/" + name] = (ROOT / "docker" / name).read_bytes()
     for role in ("arm", "base"):
-        files[f"dds_{role}.xml"] = dds_xml(config["hosts"][role]["dds_address"]).encode()
+        renderer = fastdds_xml if config["deployment"] == "external" else dds_xml
+        files[f"dds_{role}.xml"] = renderer(config["hosts"][role]["dds_address"]).encode()
     files["base_robot.yaml"] = json.dumps({"ROBOT1": {
         "robot_type": "tmrv0_2", "namespace": "", "robot_ip": config["base"].get("ip", ""),
         "use_fake_hardware": "false", "use_rviz": "false",
@@ -172,8 +186,12 @@ def bundle_files(config: dict) -> dict[str, bytes]:
             "export LD_LIBRARY_PATH=/opt/ebim-libfranka/lib:/usr/local/zed/lib:/usr/local/cuda/lib64"]),
         *[f"source {shlex.quote(p)}" for p in [base["ros_setup"], *base["overlays"]]],
         f"export ROS_DOMAIN_ID={config['domains']['base']}",
-        "export ROS_LOCALHOST_ONLY=0 ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET RMW_IMPLEMENTATION=rmw_cyclonedds_cpp",
-        'export CYCLONEDDS_URI="file://$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/dds_base.xml"',
+        *(["export ROS_LOCALHOST_ONLY=0 RMW_IMPLEMENTATION=rmw_fastrtps_cpp",
+           'export FASTRTPS_DEFAULT_PROFILES_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/dds_arm.xml"',
+           'export PYTHONPATH="/app/src${PYTHONPATH:+:$PYTHONPATH}"',
+           'unset CYCLONEDDS_URI ROS_DISCOVERY_SERVER'] if config["deployment"] == "external" else [
+           "export ROS_LOCALHOST_ONLY=0 ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET RMW_IMPLEMENTATION=rmw_cyclonedds_cpp",
+           'export CYCLONEDDS_URI="file://$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/dds_base.xml"']),
         "export PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1", "",
     ])).encode()
     if config["deployment"] == "external":
@@ -181,8 +199,8 @@ def bundle_files(config: dict) -> dict[str, bytes]:
         mapping["topics"]["head"] = config["camera"]["image_topic"]
         mapping["topics"]["camera_info"] = config["camera"]["camera_info_topic"]
         mapping["camera_intrinsics"] = "live_rectified"
-        for side in ("left", "right"):
-            mapping["topics"][side + "_pose"] = f"/franka_duo/measured/{side}_pose"
+        # Organizer confirms current_pose is TCP in the corresponding arm link0,
+        # despite header.frame_id being 'base'. Do not add a tool offset again.
         files["policy.yaml"] = yaml.safe_dump(mapping).encode()
     return files
 
@@ -257,8 +275,10 @@ class Orchestrator:
                               "domains": self.config["domains"], "image": self.config["image"],
                               "components": {key: self.config[key]["mode"] for key in COMPONENTS},
                               "camera": self.config["camera"], "base_container_required": False,
-                              "steps": ["read-only hardware graph check", "deploy local routes and policy",
-                                        "verify command ownership handoff", "start servo and route velocity adapter",
+                              "steps": ["start fixed DDS gateway before arm Move mode", "read-only hardware graph check",
+                                        "deploy local routes and policy", "verify command ownership handoff",
+                                        "configure impedance if unconfigured", "start servo and route velocity adapter",
+                                        "activate impedance after target alignment only with --activate",
                                         "run mission only with --execute"]}, indent=2))
             return
         print(json.dumps({"release": self.release, "profile": self.config["profile"],
@@ -304,15 +324,14 @@ else:
             self.execute(role, ["/usr/bin/python3", "-B", "-c", code, root, self.release], payload=payload)
 
     def run(self, operation, activate=False, execute=False):
-        if self.config["deployment"] == "external" and activate:
-            raise ValueError("external deployment does not activate controllers; use up without --activate")
         if operation == "plan":
             return self.plan()
         if operation in ("check", "up"):
             if self.config["deployment"] == "external":
                 self.deploy()
-            for role in ("arm", "base"):
-                self.host(role, "check")
+            if self.config["deployment"] != "external" or operation == "check":
+                for role in ("arm", "base"):
+                    self.host(role, "check")
             if operation == "check":
                 return
         if operation == "up":

@@ -259,7 +259,7 @@ def prepare(args) -> tuple[dict[str, StagePose | None], Mapping[str, Any], np.nd
 def run(args) -> int:
     poses, config, t_base_from_cam, limits, calibration = prepare(args)
 
-    import rclpy
+    from .ros_backend import ros as rclpy
     from geometry_msgs.msg import PoseStamped
     from rclpy.qos import qos_profile_sensor_data
     from sensor_msgs.msg import CameraInfo, Image, JointState

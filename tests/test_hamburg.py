@@ -3,6 +3,7 @@ import importlib.util
 import json
 import shlex
 import subprocess
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -12,7 +13,7 @@ import pytest
 import yaml
 
 from franka_duo_tele_data.camera_input import camera_matrix, require_saved_image_intrinsics
-from franka_duo_tele_data.hardware import ROOT, Orchestrator, bundle_files, load_hardware
+from franka_duo_tele_data.hardware import ROOT, Orchestrator, bundle_files, fastdds_xml, load_hardware
 from franka_duo_tele_data.table_mission import MissionConfig, build_base_argv
 
 
@@ -43,13 +44,14 @@ def test_external_docker_has_no_ssh_devices_or_vendor_mounts(hamburg):
     assert args[args.index("--network") + 1] == "host"
 
 
-def test_external_policy_uses_live_camera_and_internal_fk(hamburg):
+def test_external_policy_uses_live_camera_and_organizer_tcp(hamburg):
     files = bundle_files(hamburg)
     policy = yaml.safe_load(files["policy.yaml"])
     assert policy["camera_intrinsics"] == "live_rectified"
     assert policy["topics"]["head"] == "/head_camera/zed_node/rgb/color/rect/image"
     assert policy["topics"]["camera_info"] == "/head_camera/zed_node/rgb/color/rect/camera_info"
-    assert policy["topics"]["left_pose"] == "/franka_duo/measured/left_pose"
+    assert policy["topics"]["left_pose"] == "/left/franka_robot_state_broadcaster/current_pose"
+    assert "RMW_IMPLEMENTATION=rmw_fastrtps_cpp" in files["base_env.sh"].decode()
     assert "ROS_DOMAIN_ID=0" in files["base_env.sh"].decode()
     assert "ebim-base" not in files["base_env.sh"].decode()
 
@@ -67,14 +69,14 @@ def test_external_rejects_managed_component_or_split_domains(tmp_path):
             load_hardware(path)
 
 
-def test_external_never_activates_or_deploys_remotely(hamburg):
+def test_external_activation_uses_only_local_host(hamburg):
     runner = Orchestrator(hamburg)
     runner.host = Mock()
     runner.deploy = Mock()
-    with pytest.raises(ValueError, match="does not activate"):
-        runner.run("up", activate=True)
-    runner.host.assert_not_called()
-    runner.deploy.assert_not_called()
+    runner.run("up", activate=True)
+    runner.deploy.assert_called_once()
+    assert runner.host.call_args.args == ("arm", "up")
+    assert runner.host.call_args.kwargs == {"activate": True}
 
 
 def test_local_route_runs_under_heartbeat_supervision():
@@ -140,6 +142,7 @@ def external_host(hamburg, tmp_path, monkeypatch):
     host.assert_no_conflicts = Mock()
     host.health = Mock()
     host.start = Mock()
+    host.start_gateway = Mock()
     return host
 
 
@@ -159,7 +162,7 @@ def test_external_start_never_loads_drivers_or_switches_controllers(hamburg, tmp
     host = external_host(hamburg, tmp_path, monkeypatch)
     host.probe = Mock()
     host.up(False)
-    assert [c.args[0] for c in host.probe.call_args_list] == ["inactive", "unowned", "runtime-ready"]
+    assert [c.args[0] for c in host.probe.call_args_list] == ["inactive", "unowned", "check", "configure-impedance", "runtime-ready"]
     assert [c.args[0] for c in host.start.call_args_list] == ["external-servo", "routes"]
 
 
@@ -170,9 +173,9 @@ def test_existing_command_publisher_blocks_handoff():
     namespace = {"Probe": object, "COMMANDS": commands}
     exec(compile(ast.Module(body=[definition], type_ignores=[]), "external_probe.py", "exec"), namespace)
     probe = namespace["ExternalProbe"]()
-    probe.no_target_publishers = Mock()
+    probe.wait = Mock()
     for occupied in commands:
-        probe.node = SimpleNamespace(count_publishers=lambda topic, occupied=occupied: int(topic == occupied))
+        probe.node = SimpleNamespace(count_publishers=lambda topic, occupied=occupied: int(topic == occupied or topic == "/franka_duo/joint_servo/action_chunk"))
         with pytest.raises(RuntimeError, match="handoff required"):
             probe.unowned()
 
@@ -218,9 +221,28 @@ def test_route_placement_requires_return_run_id(monkeypatch):
         module.main(["placement", "--execute"])
 
 
-def test_external_launcher_rejects_activation_before_creating_container(hamburg):
+def test_external_launcher_passes_explicit_activation(hamburg):
     spec = importlib.util.spec_from_file_location("launcher", ROOT / "docker/launch_args.py")
     launcher = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(launcher)
-    with pytest.raises(ValueError, match="operator handoff"):
-        launcher.launch_args(ROOT / "hardware.hamburg.yaml", hamburg["image"], "/absent", "ebim", "up", True)
+    args = launcher.launch_args(ROOT / "hardware.hamburg.yaml", hamburg["image"], "/absent", "ebim", "up", True)
+    assert args[-1] == "--activate"
+
+
+def test_fastdds_preserves_organizer_transport_and_replaces_station_ip():
+    root = ET.fromstring(fastdds_xml("192.168.50.4"))
+    ns = {"d": "http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles"}
+    assert [e.text for e in root.findall(".//d:interfaceWhiteList/d:address", ns)] == ["192.168.50.4", "127.0.0.1"]
+    for tag, expected in [("type", "UDPv4"), ("maxMessageSize", "65500"),
+                          ("sendBufferSize", "4194304"), ("receiveBufferSize", "16777216"),
+                          ("useBuiltinTransports", "false")]:
+        assert root.find(".//d:" + tag, ns).text == expected
+
+
+def test_gateway_is_never_recreated_under_live_target_streams(hamburg, tmp_path, monkeypatch):
+    host = external_host(hamburg, tmp_path, monkeypatch)
+    del host.start_gateway  # Exercise the actual guard, not the startup stub.
+    host.state["processes"] = {"external-servo": {"pid": 10}}
+    host.alive = lambda _: True
+    with pytest.raises(RuntimeError, match="cannot recreate DDS"):
+        host.start_gateway()

@@ -10,7 +10,7 @@ from pathlib import Path
 from franka_duo_joint_servo.model import default_model_directory, load_model_parameters
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction, SetEnvironmentVariable
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -59,7 +59,8 @@ def _launch_node(context):
 def generate_launch_description() -> LaunchDescription:
     return LaunchDescription(
         [
-            SetEnvironmentVariable(name="RMW_IMPLEMENTATION", value="rmw_cyclonedds_cpp"),
+            SetEnvironmentVariable(name="RMW_IMPLEMENTATION", value=EnvironmentVariable(
+                "RMW_IMPLEMENTATION", default_value="rmw_cyclonedds_cpp")),
             DeclareLaunchArgument("model_directory", default_value=str(default_model_directory())),
             DeclareLaunchArgument("action_frame", default_value="link0"),
             DeclareLaunchArgument("tool_offset_z_m", default_value="0.174"),

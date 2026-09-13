@@ -9,7 +9,14 @@ hardware driver startup or separate base container is required.
 The station needs Bash, Docker, DDS connectivity to the companion (including
 UDP discovery/multicast) and synchronized clocks. ROS is included in the image.
 On a station with multiple network interfaces, set `hosts.arm.dds_address` to
-the **station's** IP on the robot LAN. `auto` uses Cyclone DDS interface selection.
+the **station's** IP on the robot LAN. `auto` accepts exactly one non-loopback IPv4 address; with multiple addresses,
+set the robot-LAN IPv4 address explicitly. The runtime verifies that it belongs
+to the station before starting DDS. The attachment
+`configs/hamburg/hamburg_fastdds_profile.xml` is the authoritative template: the
+runtime replaces its station address, retains loopback, uses UDP-only Fast DDS
+and native multicast discovery, with no discovery server. It preserves
+`maxMessageSize=65500`, 4 MiB send and 16 MiB receive buffers. The host must allow
+these socket buffer sizes. All task ROS processes use `rmw_fastrtps_cpp`.
 
 ## Interface mapping
 
@@ -29,32 +36,28 @@ Both `domains.arm` and `domains.base` are `0`.
 | LiDARs | `/lidar_front/scan`, `/lidar_rear/scan` | `sensor_msgs/msg/LaserScan` |
 | Head image | `/head_camera/zed_node/rgb/color/rect/image` | `sensor_msgs/msg/Image`, rectified 640x360 `bgr8` |
 | Head intrinsics | `/head_camera/zed_node/rgb/color/rect/camera_info` | `sensor_msgs/msg/CameraInfo` |
-| Controller status | `/{left,right}/controller_manager/list_controllers` | `controller_manager_msgs/srv/ListControllers`, read only; availability pending organizer confirmation |
+| Controller status | `/{left,right}/controller_manager/list_controllers` | `controller_manager_msgs/srv/ListControllers`, confirmed; used by the resident gateway |
 
-Arm joint names are `{left,right}_fr3v2_joint1` through `joint7`, with commands
-ordered from joint 1 to 7. Measured poses are computed from these joint states
-using the bundled FR3v2 model and published internally at
-`/franka_duo/measured/{left,right}_pose` (**TCP** expressed in that arm's link0).
-Both FK feedback and IK targets use the same tool transform:
-`T_link0_TCP = T_link0_link8 * T_link8_TCP`. The reference configuration is
-a translation of **+0.174 m along link8's local Z axis**, with no rotation,
-matching the existing IK and the recorded `F_T_EE` in
-`configs/ptp_home_target.json`. A link8 pose alone is not valid TCP feedback.
+Arm joint names are `{left,right}_fr3v2_joint1` through `joint7`. Incoming
+joint arrays are matched by name. Outgoing commands pair names and positions,
+use RELIABLE/VOLATILE QoS and are published at **20 Hz**. The internal trajectory
+servo remains at 1000 Hz. An independent relay maintains the last target on
+input loss; no command gap may exceed the organizer's **0.5 s** timeout.
 
-Before a physical run, ask the organizer to confirm the complete link8-to-TCP
-transform for **each arm**, including translation and rotation. Identical
-camera mounting does not establish identical TCP configuration. Also request
-the topic, type and frame semantics of any available `current_pose` feedback
-for comparison. If Hamburg uses a different TCP transform, both FK and IK
-must be adapted together before execution. Direct `current_pose` feedback is
-optional only when the TCP transform and robot model used for FK are confirmed.
+The mission now reads the organizer's
+`/{left,right}/franka_robot_state_broadcaster/current_pose` directly as
+`geometry_msgs/msg/PoseStamped`. The organizer and team confirmed that its
+`base` frame means the corresponding arm's **link0**, and its payload is the
+**TCP**, including +0.174 m along link8's local Z with no rotation. No offset is
+added to this feedback. IK still removes that tool transform when solving for
+link8. The internal `/franka_duo/measured/{left,right}_pose` FK outputs remain
+available for comparison; no FR3 TF chain is required.
 
-The supplied MoveAbsolute example confirms the goal fields `position`,
-`velocity`, `acceleration`, `deceleration`. The bundled definition uses metres,
-metres/second and metres/second squared. Its result is `success`, `stop_by`,
-`error`, and feedback is `current_position`. GetPosition has an empty request
-and returns `float64 position`, `bool success`. Confirm these complete wire
-definitions with the organizer. External mode never calls `switch_on`.
+The organizer confirmed the complete bundled MoveAbsolute and GetPosition wire
+definitions. Motion uses metres, metres/second and metres/second squared;
+Hamburg's spine range is **0–0.770 m**. Mission heights 0.468 m and 0.700 m are
+valid. External mode never calls `switch_on` and does not use the additional
+`/spine/target_height` topic.
 
 ## Build and inspect
 
@@ -75,49 +78,59 @@ reported by `check` and are allowed at this inspection stage.
 
 ## Command handoff and mission
 
-The organizer's existing continuous command publishers must be handed over.
-The proposed sequence below requires organizer confirmation before a real run.
-If the testbed uses a command multiplexer, obtain its switching procedure and
-adapt the handoff to that interface first.
+Start the container while the arms are out of Move mode. All task DDS
+participants and endpoints are created before impedance activation: the servo,
+two target relays, velocity adapter and resident ROS gateway. Subsequent phase
+processes use a Unix socket to that gateway, with local callbacks and existing
+ROS endpoints. They never initialize DDS. Status, readiness, controller
+switching and spine action requests use the same gateway. No ROS CLI is used
+for controller switching, and no gateway is recreated while target streams exist.
 
-1. Organizer deactivates both `joint_impedance_controller` instances, then
-   stops the previous arm command publishers. Also release any publishers on
-   the gripper command topics and `/swerve_drive_controller/cmd_vel`.
-2. Start the task runtime. It checks inactive arm controllers and vacant command
-   topics before starting the servo, target relay and base velocity adapter:
+1. With impedance deactivated and the arms out of Move mode, the organizer
+   stops existing arm, gripper and base command publishers.
+   Their pause/resume interface remains unspecified; this container does not
+   kill organizer processes. Occupied robot command topics block startup.
+2. Start and activate through the existing controller managers:
 
    ```bash
-   bash scripts/docker_hardware.sh up --hardware hardware.hamburg.yaml
+   bash scripts/docker_hardware.sh up --hardware hardware.hamburg.yaml --activate
    bash scripts/docker_hardware.sh status
    ```
 
-3. Organizer verifies that joint targets match measured positions, then
-   activates both impedance controllers. The task must remain stationary
-   during handoff. The servo initially follows measured joints for up to
-   60 seconds, then latches its idle target; if activation is delayed, verify
-   alignment again. The mission checks alignment and active controller state.
-4. Run a dry plan, then explicitly execute the mission:
+   The runtime deactivates impedance if needed, checks command ownership,
+   configures an `unconfigured` impedance controller using
+   `/{left,right}/controller_manager/configure_controller`, starts aligned
+   targets, waits for the idle target latch and checks target freshness before
+   activating. If configure is unavailable, the organizer must pre-configure
+   both controllers as `inactive`. Both broadcasters stay active throughout.
+   A partial activation failure triggers deactivation; streams remain alive.
+   Without `--activate`, startup prepares the target streams and leaves
+   impedance inactive for an operator-controlled handoff.
+3. Run a dry plan, then explicitly execute:
 
    ```bash
    bash scripts/docker_hardware.sh mission
    bash scripts/docker_hardware.sh mission --execute
    ```
 
-5. After the mission, organizer deactivates both impedance controllers before
-   shutting down the task:
+4. Shut down through the wrapper:
 
    ```bash
    bash scripts/docker_hardware.sh down
    ```
 
-`up --activate` and the combined `run --execute` workflow are not supported for
-external hardware. This image never switches organizer controllers. `down`
-refuses to stop a running target stream while a command controller is active.
-Do not bypass it using `docker stop` during active impedance control.
+   The resident gateway first deactivates both impedance controllers and checks
+   their state. Only after successful deactivation are target streams stopped.
+   If deactivation fails, the container and streams remain running. If the
+   gateway itself fails, organizer intervention is required; it is not restarted
+   during active control. Do not bypass this sequence with `docker stop`.
 
-`mission`, `status` and `down` use the profile retained in the running container;
-they do not require another `--hardware` argument. Logs are available using
-`bash scripts/docker_hardware.sh logs` and `/app/runtime/logs/` inside the runtime.
+`mission`, `status` and `down` use the profile retained in the running container.
+`check` also reuses an existing runtime and gateway, avoiding new DDS discovery.
+Before runtime startup, run `check` only with the arms out of Move mode.
+Logs are available using `bash scripts/docker_hardware.sh logs` and
+`/app/runtime/logs/` inside the runtime. Existing target streams remain alive
+after mission errors; accepted trajectory chunks may finish before holding.
 
 ## Camera and routes
 
@@ -126,6 +139,7 @@ projection matrix `P` supplies the intrinsics; if `P` is unset, the live `K`
 matrix is used. Image and CameraInfo dimensions and frame IDs must match.
 External mode refuses saved-image inference without live intrinsics and never
 falls back to the bundled SN17064700 camera matrix or SDK calibration file.
+Image and CameraInfo subscriptions use sensor-data BEST_EFFORT/VOLATILE QoS.
 
 `configs/zed_pnp_calibration.json` still supplies the Shanghai camera-to-robot
 extrinsics. The user confirmed identical camera mounting, table locations,
@@ -160,7 +174,9 @@ the same ID so it can validate the return report. Each leg requires the robot
 at that leg's Shanghai starting pose, arms already in their travel posture and
 spine at 0.700 m. This diagnostic entry point does not reposition arms or spine.
 It shares the full mission's lifecycle lock, route lock and heartbeat watchdog.
-The runtime must already own the velocity adapter and command topics.
+The runtime must already own the velocity adapter and command topics. Route
+callbacks use the resident gateway, including latched `/tf_static` subscriptions.
+Unknown ROS endpoints are rejected rather than created during a phase.
 
 ## Offline verification
 
@@ -174,5 +190,6 @@ docker run --rm --platform linux/amd64 --network none \
 ```
 
 The complete physical mission still requires on-site verification after the
-controller handoff, both-arm TCP transforms and custom spine interface
-definitions are confirmed.
+command publisher handoff is arranged. TCP transforms and spine definitions
+are confirmed; the remaining organizer questions are in
+[HAMBURG_QUESTIONS.md](HAMBURG_QUESTIONS.md).

@@ -5,7 +5,7 @@ deployment: external
 image: franka-duo-table-mission:hamburg
 hosts:
   arm:
-    # Auto works on a single DDS interface; on a multi-NIC station set its LAN IP.
+    # Auto accepts a single non-loopback IPv4 interface. Otherwise set robot-LAN IP.
     dds_address: auto
 domains:
   arm: 0

@@ -97,7 +97,7 @@ def run(args) -> int:
     config = load_mapping(args.config)
     _poses, limits, _spine = load_stage_poses(args.stage_poses)
 
-    import rclpy
+    from .ros_backend import ros as rclpy
     from geometry_msgs.msg import PoseStamped
     from rclpy.qos import qos_profile_sensor_data
     from sensor_msgs.msg import JointState

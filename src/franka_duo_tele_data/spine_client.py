@@ -102,10 +102,10 @@ def report_is_stable(
 
 def move_spine(node, motion: SpineMotion, *, tolerance_m: float = POSITION_TOLERANCE_M) -> dict:
     """Switch on, move to ``motion.position_m`` and prove the height by reading it back."""
-    import rclpy
+    from .ros_backend import ros as rclpy
     from franka_spine_msgs.action import MoveAbsolute
     from franka_spine_msgs.srv import GetPosition, SwitchOn
-    from rclpy.action import ActionClient
+    from .ros_backend import ActionClient
 
     external = os.environ.get("EBIM_EXTERNAL_HARDWARE") == "1"
     switch_on = None if external else node.create_client(SwitchOn, SWITCH_ON_SERVICE)
@@ -197,7 +197,7 @@ def run(args) -> int:
         )
         return 0
 
-    import rclpy
+    from .ros_backend import ros as rclpy
 
     rclpy.init()
     node = rclpy.create_node("franka_duo_spine_height")
