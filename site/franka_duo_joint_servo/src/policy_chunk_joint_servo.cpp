@@ -238,6 +238,9 @@ class PolicyChunkJointServo final : public rclcpp::Node {
         !positive(wait_timeout_s_) || commit_lead_steps_ < 0 || blend_steps_ < 0) {
       throw std::invalid_argument("servo parameters must be finite, positive and speed <= 1");
     }
+    // Cartesian actions and measured poses refer to the same TCP. Apply this
+    // transform in FK and its inverse in IK, in the configured tip frame.
+    tip_to_tool_.translation().z() = tool_offset_z_m_;
     Joints fallback{};
     max_velocity_ = arrayParameter(*this, "max_joint_velocity_rad_s", fallback);
     const Joints max_acceleration = arrayParameter(*this, "max_joint_acceleration_rad_s2", fallback);
@@ -386,16 +389,17 @@ class PolicyChunkJointServo final : public rclcpp::Node {
     }
     const auto& publisher = left ? left_pose_publisher_ : right_pose_publisher_;
     if (publisher && measured_state_) {
-      const std::string side = left ? "left" : "right";
+      const auto& arm_base_link = left ? left_arm_base_link_ : right_arm_base_link_;
+      const auto& tip_link = left ? left_tip_link_ : right_tip_link_;
       measured_state_->setJointGroupPositions(left ? left_group_ : right_group_, values.data());
       measured_state_->update();
       const Eigen::Isometry3d pose =
-          measured_state_->getGlobalLinkTransform(side + "_fr3v2_link0").inverse() *
-          measured_state_->getGlobalLinkTransform(side + "_fr3v2_link8");
+          measured_state_->getGlobalLinkTransform(arm_base_link).inverse() *
+          measured_state_->getGlobalLinkTransform(tip_link) * tip_to_tool_;
       const Eigen::Quaterniond rotation(pose.rotation());
       geometry_msgs::msg::PoseStamped out;
       out.header = message.header;
-      out.header.frame_id = side + "_fr3v2_link0";
+      out.header.frame_id = arm_base_link;
       out.pose.position.x = pose.translation().x();
       out.pose.position.y = pose.translation().y();
       out.pose.position.z = pose.translation().z();
@@ -464,9 +468,7 @@ class PolicyChunkJointServo final : public rclcpp::Node {
     }
     const Eigen::Isometry3d target_ee =
         state_->getGlobalLinkTransform(arm_base) * target_ee_in_arm_base;
-    Eigen::Isometry3d tip_to_tool = Eigen::Isometry3d::Identity();
-    tip_to_tool.translation().z() = tool_offset_z_m_;
-    const Eigen::Isometry3d target_tip = target_ee * tip_to_tool.inverse();
+    const Eigen::Isometry3d target_tip = target_ee * tip_to_tool_.inverse();
 
     const std::vector<double> consistency_limits(kJoints, max_joint_delta_rad_);
     bool solved = state_->setFromIK(group, target_tip, tip_link, consistency_limits, ik_timeout_s_);
@@ -883,6 +885,7 @@ class PolicyChunkJointServo final : public rclcpp::Node {
   std::string left_group_name_, right_group_name_, left_arm_base_link_, right_arm_base_link_;
   std::string left_tip_link_, right_tip_link_, action_frame_;
   double tool_offset_z_m_{0.174};
+  Eigen::Isometry3d tip_to_tool_{Eigen::Isometry3d::Identity()};
   double ik_timeout_s_{0.02};
   double max_joint_delta_rad_{0.35};
   double action_rate_hz_{30.0};

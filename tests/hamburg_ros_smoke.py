@@ -6,24 +6,52 @@ import subprocess
 import sys
 import threading
 import time
+import xml.etree.ElementTree as ET
 
+import cv2
 import numpy as np
 import rclpy
 from controller_manager_msgs.msg import ControllerState
 from controller_manager_msgs.srv import ListControllers
 from franka_spine_msgs.action import MoveAbsolute
 from franka_spine_msgs.srv import GetPosition
-from geometry_msgs.msg import TwistStamped
+from geometry_msgs.msg import PoseStamped, TwistStamped
 from nav_msgs.msg import Odometry
 from rclpy.action import ActionServer
 from rclpy.executors import SingleThreadedExecutor
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image, JointState, LaserScan
 from std_msgs.msg import Float32
 
 from franka_duo_tele_data.hardware import ROOT, Orchestrator, load_hardware
+from franka_duo_tele_data.mcap_to_lerobot import quaternion_to_matrix
 
 sys.path.insert(0, str(ROOT / "scripts/hardware"))
 from external import ExternalHost
+
+
+def expected_tcp(side, positions):
+    # Independent URDF chain evaluation catches omitted tool offsets and
+    # offsets incorrectly applied along world Z instead of the rotated tip Z.
+    robot = ET.parse(ROOT / "site/franka_duo_joint_servo/model/robot.urdf").getroot()
+    pose = np.eye(4)
+    for index in range(1, 9):
+        joint = robot.find(f"joint[@name='{side}_fr3v2_joint{index}']")
+        origin = joint.find("origin")
+        transform = np.eye(4)
+        rpy = np.fromstring(origin.get("rpy"), sep=" ")
+        for axis, angle in zip(np.eye(3), rpy):
+            transform[:3, :3] = cv2.Rodrigues(axis * angle)[0] @ transform[:3, :3]
+        transform[:3, 3] = np.fromstring(origin.get("xyz"), sep=" ")
+        pose = pose @ transform
+        if joint.get("type") == "revolute":
+            axis = np.fromstring(joint.find("axis").get("xyz"), sep=" ")
+            rotation = np.eye(4)
+            rotation[:3, :3] = cv2.Rodrigues(axis * positions[index - 1])[0]
+            pose = pose @ rotation
+    tcp = pose.copy()
+    tcp[:3, 3] += pose[:3, :3] @ np.array([0., 0., 0.174])
+    return pose, tcp
 
 
 def wait_for(predicate, timeout=10):
@@ -44,10 +72,15 @@ class MockHardware:
         self.publishers = []
         self.previous = []
         self.services = []
+        self.joints = {}
         for side in ("left", "right"):
             joints = JointState()
             joints.name = [f"{side}_fr3v2_joint{i}" for i in range(1, 8)]
             joints.position = [0., -0.7, 0.1, -2., 0., 1.5, 0.1]
+            if side == "right":
+                reference = json.loads((ROOT / "configs/ptp_home_target.json").read_text())
+                joints.position = reference["provenance"]["right"]["measured_q"]
+            self.joints[side] = joints
             self.add(JointState, f"/{side}/franka_robot_state_broadcaster/measured_joint_states", joints)
             gripper = JointState()
             gripper.name, gripper.position = ["finger_joint"], [0.0]
@@ -56,6 +89,7 @@ class MockHardware:
             self.previous.append((self.node.create_publisher(JointState, target, 10), joints))
             self.listen(JointState, target)
             self.listen(Float32, f"/{side}/gripper/gripper_client/target_gripper_width_percent")
+            self.listen(PoseStamped, f"/franka_duo/measured/{side}_pose", qos_profile_sensor_data)
             self.services.append(self.node.create_service(
                 ListControllers, f"/{side}/controller_manager/list_controllers", self.controllers))
         self.listen(TwistStamped, "/swerve_drive_controller/cmd_vel")
@@ -81,8 +115,8 @@ class MockHardware:
     def add(self, kind, topic, message):
         self.publishers.append((self.node.create_publisher(kind, topic, 10), message))
 
-    def listen(self, kind, topic):
-        self.node.create_subscription(kind, topic, lambda message: self.received.__setitem__(topic, message), 10)
+    def listen(self, kind, topic, qos=10):
+        self.node.create_subscription(kind, topic, lambda message: self.received.__setitem__(topic, message), qos)
 
     def publish(self):
         stamp = self.node.get_clock().now().to_msg()
@@ -153,7 +187,20 @@ def main():
         for side in ("left", "right"):
             target = f"/{side}/gello/joint_states"
             wait_for(lambda target=target: target in hardware.received)
-            np.testing.assert_allclose(hardware.received[target].position, [0., -0.7, 0.1, -2., 0., 1.5, 0.1])
+            np.testing.assert_allclose(hardware.received[target].position, hardware.joints[side].position)
+            topic = f"/franka_duo/measured/{side}_pose"
+            wait_for(lambda topic=topic: topic in hardware.received)
+            message = hardware.received[topic]
+            assert message.header.frame_id == f"{side}_fr3v2_link0"
+            assert message.header.stamp.sec > 0
+            position, orientation = message.pose.position, message.pose.orientation
+            actual = np.eye(4)
+            actual[:3, 3] = [position.x, position.y, position.z]
+            actual[:3, :3] = quaternion_to_matrix(orientation)
+            flange, tcp = expected_tcp(side, hardware.joints[side].position)
+            np.testing.assert_allclose(actual, tcp, atol=1e-7, rtol=0)
+            assert np.linalg.norm(actual[:3, 3] - flange[:3, 3]) > 0.17
+        print("SMOKE: both measured poses are TCPs with the rotated 0.174 m tool offset", flush=True)
         hardware.active = True
         reject(host.down)
         assert all(host.alive(item) for item in host.state["processes"].values())

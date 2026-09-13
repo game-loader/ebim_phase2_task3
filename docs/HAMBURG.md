@@ -34,8 +34,20 @@ Both `domains.arm` and `domains.base` are `0`.
 Arm joint names are `{left,right}_fr3v2_joint1` through `joint7`, with commands
 ordered from joint 1 to 7. Measured poses are computed from these joint states
 using the bundled FR3v2 model and published internally at
-`/franka_duo/measured/{left,right}_pose` (link8 expressed in that arm's link0).
-The organizer does not need to publish `current_pose` or `FrankaRobotState`.
+`/franka_duo/measured/{left,right}_pose` (**TCP** expressed in that arm's link0).
+Both FK feedback and IK targets use the same tool transform:
+`T_link0_TCP = T_link0_link8 * T_link8_TCP`. The reference configuration is
+a translation of **+0.174 m along link8's local Z axis**, with no rotation,
+matching the existing IK and the recorded `F_T_EE` in
+`configs/ptp_home_target.json`. A link8 pose alone is not valid TCP feedback.
+
+Before a physical run, ask the organizer to confirm the complete link8-to-TCP
+transform for **each arm**, including translation and rotation. Identical
+camera mounting does not establish identical TCP configuration. Also request
+the topic, type and frame semantics of any available `current_pose` feedback
+for comparison. If Hamburg uses a different TCP transform, both FK and IK
+must be adapted together before execution. Direct `current_pose` feedback is
+optional only when the TCP transform and robot model used for FK are confirmed.
 
 The supplied MoveAbsolute example confirms the goal fields `position`,
 `velocity`, `acceleration`, `deceleration`. The bundled definition uses metres,
@@ -162,4 +174,5 @@ docker run --rm --platform linux/amd64 --network none \
 ```
 
 The complete physical mission still requires on-site verification after the
-controller handoff and custom spine interface definitions are confirmed.
+controller handoff, both-arm TCP transforms and custom spine interface
+definitions are confirmed.
