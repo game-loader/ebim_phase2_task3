@@ -51,7 +51,6 @@ from .rgb20d_io import RGB20DContract
 from .spine_client import GRASP_HEIGHT_M, height_reached, move_spine, plan_motion
 from .zed_pnp_calib import (
     extrinsics_for_arm,
-    intrinsics_from_camera_info,
     load_calibration,
 )
 
@@ -293,7 +292,8 @@ def run(args) -> int:
         return cb
 
     node.create_subscription(Image, config["topics"]["head"], store("image"), qos_profile_sensor_data)
-    node.create_subscription(CameraInfo, args.camera_info_topic, store("info"), qos_profile_sensor_data)
+    node.create_subscription(CameraInfo, args.camera_info_topic or config["topics"].get(
+        "camera_info", "/head_camera/zed/rgb/color/rect/camera_info"), store("info"), qos_profile_sensor_data)
     for side in SIDES:
         node.create_subscription(
             PoseStamped,
@@ -396,6 +396,9 @@ def run(args) -> int:
         # 3. Detect on the head ZED at the calibrated height.
         if args.image is not None:
             import cv2
+            from .camera_input import require_saved_image_intrinsics
+
+            require_saved_image_intrinsics(config)
 
             bgr = cv2.imread(str(args.image))
             if bgr is None:
@@ -408,10 +411,12 @@ def run(args) -> int:
                 time.sleep(0.05)
             if latest["image"] is None or latest["info"] is None:
                 raise TimeoutError("no ZED image/camera_info; check whether the camera host is up")
-            k_matrix, _dist, _size = intrinsics_from_camera_info(latest["info"][1])
-            if not np.allclose(k_matrix, np.asarray(calibration["camera"]["K"]), atol=1e-3):
-                raise ValueError("live intrinsics differ from the calibration")
+            from .camera_input import camera_matrix
+
             with lock:
+                if time.monotonic() - latest["image"][0] > 0.5:
+                    raise TimeoutError("camera image is stale")
+                k_matrix = camera_matrix(latest["image"][1], latest["info"][1], config, calibration)
                 rgb = image_msg_to_rgb(latest["image"][1])
 
         detections = run_yolo(rgb, args.weights, args.conf)
@@ -521,7 +526,7 @@ def main(argv=None) -> int:
     parser.add_argument("--config", type=Path, default=Path("configs/tmr_rgb20d.yaml"))
     parser.add_argument("--calibration", type=Path, default=Path("configs/zed_pnp_calibration.json"))
     parser.add_argument("--stage-poses", type=Path, default=Path("configs/grasp_stage_poses.json"))
-    parser.add_argument("--camera-info-topic", default="/head_camera/zed/rgb/color/rect/camera_info")
+    parser.add_argument("--camera-info-topic", default=None)
     parser.add_argument("--weights", default="outputs/zed_pnp/yolo11n-seg.pt")
     parser.add_argument("--conf", type=float, default=0.15)
     parser.add_argument("--image", type=Path, help="saved frame instead of the live ZED image")

@@ -69,6 +69,8 @@ def supervise(command, fd, heartbeat_timeout=3.0):
 
 def main():
     release, shell = sys.argv[1:3]
+    if release == "--local":
+        return supervise(["bash", "--noprofile", "--norc", "-c", shell], sys.stdin.fileno())
     if release != os.environ["EBIM_BASE_RELEASE"]:
         raise RuntimeError("mission release differs from running base container")
     from host import Host

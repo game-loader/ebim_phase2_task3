@@ -37,7 +37,6 @@ from .rgb20d_io import RGB20DContract
 from .zed_pnp_calib import (
     extrinsics_for_arm,
     intersect_height,
-    intrinsics_from_camera_info,
     load_calibration,
     project_points,
 )
@@ -795,7 +794,8 @@ def run(args) -> int:
         return cb
 
     node.create_subscription(Image, config["topics"]["head"], store("image"), qos_profile_sensor_data)
-    node.create_subscription(CameraInfo, args.camera_info_topic, store("info"), qos_profile_sensor_data)
+    node.create_subscription(CameraInfo, args.camera_info_topic or config["topics"].get(
+        "camera_info", "/head_camera/zed/rgb/color/rect/camera_info"), store("info"), qos_profile_sensor_data)
     for side in SIDES:
         node.create_subscription(
             PoseStamped,
@@ -838,6 +838,9 @@ def run(args) -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     try:
         if args.image is not None:
+            from .camera_input import require_saved_image_intrinsics
+
+            require_saved_image_intrinsics(config)
             # Saved frame: perception from an image, robot state still live. The tray must
             # not have moved since the frame was taken; the robot pose does not matter.
             if args.publish:
@@ -860,16 +863,13 @@ def run(args) -> int:
                 time.sleep(0.05)
             if latest["image"] is None or latest["info"] is None:
                 raise TimeoutError("no ZED image/camera_info")
-            k_matrix, _dist, _size = intrinsics_from_camera_info(latest["info"][1])
-            calibrated_k = np.asarray(calibration["camera"]["K"], dtype=np.float64)
-            drift = float(np.abs(k_matrix - calibrated_k).max())
-            if drift > args.max_intrinsics_drift_px:
-                raise ValueError(
-                    f"live intrinsics differ from the calibration by {drift:.2f} px; recalibrate"
-                )
-            if drift > 0.1:
-                print(json.dumps({"intrinsics_drift_px": round(drift, 3)}), flush=True)
+            from .camera_input import camera_matrix
+
             with lock:
+                if time.monotonic() - latest["image"][0] > 0.5:
+                    raise TimeoutError("camera image is stale")
+                k_matrix = camera_matrix(latest["image"][1], latest["info"][1], config, calibration,
+                                         tolerance_px=args.max_intrinsics_drift_px)
                 rgb = image_msg_to_rgb(latest["image"][1])
         observation = reader.next(timeout_s=3)
         state = observation.state
@@ -1078,7 +1078,7 @@ def main(argv=None) -> int:
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--config", type=Path, default=Path("configs/tmr_rgb20d.yaml"))
     parser.add_argument("--calibration", type=Path, default=Path("configs/zed_pnp_calibration.json"))
-    parser.add_argument("--camera-info-topic", default="/head_camera/zed/rgb/color/rect/camera_info")
+    parser.add_argument("--camera-info-topic", default=None)
     parser.add_argument("--weights", default="outputs/zed_pnp/yolo11n-seg.pt")
     parser.add_argument("--conf", type=float, default=0.15)
     parser.add_argument("--max-intrinsics-drift-px", type=float, default=2.0)

@@ -49,6 +49,7 @@ def _launch_node(context):
                 "joint_state_timeout_s": number("joint_state_timeout_s"),
                 "idle_follow_timeout_s": number("idle_follow_timeout_s"),
                 "enable_gripper": ParameterValue(LaunchConfiguration("enable_gripper"), value_type=bool),
+                "publish_measured_pose": ParameterValue(LaunchConfiguration("publish_measured_pose"), value_type=bool),
             },
         ],
     )
@@ -75,6 +76,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("joint_state_timeout_s", default_value="0.2"),
             DeclareLaunchArgument("idle_follow_timeout_s", default_value="20.0"),
             DeclareLaunchArgument("enable_gripper", default_value="false"),
+            DeclareLaunchArgument("publish_measured_pose", default_value="false"),
             OpaqueFunction(function=_launch_node),
         ]
     )

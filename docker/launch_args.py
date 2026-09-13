@@ -19,7 +19,9 @@ def launch_args(profile, image, ssh_dir, name, operation, activate=False):
     config = load_hardware(profile, require_calibration=False)
     if config["image"] != image:
         raise ValueError("set EBIM_IMAGE to the same image reference as hardware.yaml")
-    args = ["run", "--pull", "never", "--network", "host", "--ipc", "private",
+    if activate and config["deployment"] == "external":
+        raise ValueError("external mode requires operator handoff; use up without --activate, then mission --execute")
+    args = ["run", "--pull", "never", "--network", "none" if operation == "plan" else "host", "--ipc", "private",
             "--cap-add", "SYS_NICE", "--cap-add", "IPC_LOCK",
             "--ulimit", "rtprio=99:99", "--ulimit", "memlock=-1:-1", "--shm-size", "256m"]
     args += mount(profile, "/hardware/hardware.yaml", readonly=True)
@@ -27,7 +29,8 @@ def launch_args(profile, image, ssh_dir, name, operation, activate=False):
     args += ["--env", "EBIM_HARDWARE=/hardware/hardware.yaml",
              "--env", "EBIM_CALIBRATION=/hardware/calibration.json"]
     if operation != "plan":
-        args += mount(ssh_dir, "/root/.ssh", readonly=True)
+        if config["deployment"] != "external":
+            args += mount(ssh_dir, "/root/.ssh", readonly=True)
         args += mount(name + "-state", "/app/runtime", kind="volume")
         args += mount(name + "-outputs", "/app/outputs", kind="volume")
         if config["grippers"]["mode"] == "managed":

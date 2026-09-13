@@ -6,8 +6,13 @@
 #include <string>
 #include <vector>
 
+#if __has_include(<moveit/robot_model_loader/robot_model_loader.hpp>)
 #include <moveit/robot_model_loader/robot_model_loader.hpp>
 #include <moveit/robot_state/robot_state.hpp>
+#else
+#include <moveit/robot_model_loader/robot_model_loader.h>
+#include <moveit/robot_state/robot_state.h>
+#endif
 #include <rclcpp/rclcpp.hpp>
 
 int main(int argc, char** argv) {

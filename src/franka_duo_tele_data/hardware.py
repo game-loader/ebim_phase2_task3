@@ -1,7 +1,7 @@
-"""Hardware profile, reproducible deployment and two-host startup orchestration.
+"""Hardware profiles, deployment and task startup orchestration.
 
-This module is ROS-free. Arm commands run inside the Jazzy image; SSH manages
-the Humble base container. Neither host needs a native ROS workspace.
+This module is ROS-free. The external profile runs locally in a Humble task
+container; the reference profile uses a Jazzy arm image and SSH to a Humble base.
 """
 
 from __future__ import annotations
@@ -41,20 +41,38 @@ def load_hardware(path: Path, *, require_calibration=True) -> dict:
         raise ValueError("hardware.yaml requires version: 1")
     if config.get("profile") != "tmr_fr3v2_duo":
         raise ValueError("only tmr_fr3v2_duo with the original mounting geometry is supported")
+    local = config.setdefault("deployment", "two-host") == "external"
+    if config["deployment"] not in ("two-host", "external"):
+        raise ValueError("deployment must be two-host or external")
+    for component in COMPONENTS:
+        if config[component]["mode"] not in ("managed", "external"):
+            raise ValueError(f"{component}.mode must be managed or external")
+        if local and config[component]["mode"] != "external":
+            raise ValueError("external deployment requires all hardware modes to be external")
+    if local:
+        config.setdefault("hosts", {}).setdefault("arm", {"dds_address": "auto"})
+        config["hosts"]["base"] = {"dds_address": config["hosts"]["arm"]["dds_address"]}
+        for key in ("image_topic", "camera_info_topic"):
+            if not re.fullmatch(r"/[A-Za-z_][A-Za-z0-9_/]*", config["camera"].get(key, "")):
+                raise ValueError(f"camera.{key} must be an absolute ROS topic")
     arm = config["hosts"]["arm"]
     if any(key in arm for key in ("runtime_root", "ros_setup", "overlays", "ssh_directory")):
         raise ValueError("arm runtime paths are supplied by the image; remove legacy host workspace settings")
     arm.update(runtime_root="/app/runtime", ros_setup="/opt/ros/jazzy/setup.bash",
                overlays=["/opt/ebim-drivers/install/setup.bash", "/app/site/install/setup.bash"],
                ssh_directory="/root/.ssh")
+    if local:
+        arm.update(ros_setup="/opt/ros/humble/setup.bash", overlays=["/app/site/install/setup.bash"])
     base = config["hosts"]["base"]
     if any(key in base for key in ("runtime_root", "ros_setup", "overlays")):
         raise ValueError("base runtime paths are supplied by the image; remove legacy host workspace settings")
     base.update(runtime_root="/app/runtime", ros_setup="/opt/ros/humble/setup.bash",
                 overlays=["/opt/ebim-base/install/setup.bash"])
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", base["container"]):
+    if local:
+        base.update(ros_setup=arm["ros_setup"], overlays=arm["overlays"])
+    if not local and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", base["container"]):
         raise ValueError("invalid base container name")
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./:@-]*", base["image"]):
+    if not local and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./:@-]*", base["image"]):
         raise ValueError("invalid base image reference")
     if config["camera"].get("sdk_settings_dir"):
         absolute_path(config["camera"]["sdk_settings_dir"])
@@ -62,7 +80,7 @@ def load_hardware(path: Path, *, require_calibration=True) -> dict:
         host = config["hosts"][role]
         if role == "arm" and "ssh" in host:
             raise ValueError("hosts.arm.ssh is obsolete: run on the arm host locally and remove this key")
-        if role == "base" and not re.fullmatch(r"[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+", host["ssh"]):
+        if role == "base" and not local and not re.fullmatch(r"[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+", host["ssh"]):
             raise ValueError("invalid base SSH target")
         for key in ("runtime_root", "ros_setup"):
             absolute_path(host[key])
@@ -70,28 +88,32 @@ def load_hardware(path: Path, *, require_calibration=True) -> dict:
             raise ValueError("overlays must be a list of setup files")
         for setup in host["overlays"]:
             absolute_path(setup)
-        ipaddress.IPv4Address(host["dds_address"])
+        if host["dds_address"] != "auto":
+            ipaddress.IPv4Address(host["dds_address"])
         domain = config["domains"][role]
         if type(domain) is not int or not 0 <= domain <= 232:
             raise ValueError("DDS domain must be an integer in [0, 232]")
     absolute_path(config["hosts"]["arm"]["ssh_directory"])
-    if config["domains"]["arm"] == config["domains"]["base"]:
+    if not local and config["domains"]["arm"] == config["domains"]["base"]:
         raise ValueError("arm and base control domains must be separate")
-    for component in COMPONENTS:
-        if config[component]["mode"] not in ("managed", "external"):
-            raise ValueError(f"{component}.mode must be managed or external")
+    if local and config["domains"]["arm"] != config["domains"]["base"]:
+        raise ValueError("external deployment requires a shared DDS domain")
     for section, keys in {
         "arms": ("left_ip", "right_ip"), "spine": ("ip",), "base": ("ip",),
         "lidars": ("front_ip", "rear_ip", "host_ip"),
     }.items():
+        if config[section]["mode"] == "external":
+            continue
         for key in keys:
             ipaddress.IPv4Address(config[section][key])
-    if config["arms"]["left_ip"] == config["arms"]["right_ip"]:
+    if config["arms"]["mode"] == "managed" and config["arms"]["left_ip"] == config["arms"]["right_ip"]:
         raise ValueError("left and right arm IPs must differ")
     for key in ("left_port", "right_port"):
+        if config["grippers"]["mode"] == "external":
+            continue
         if not absolute_path(config["grippers"][key]).startswith("/dev/"):
             raise ValueError("gripper port must be under /dev")
-    if config["grippers"]["left_port"] == config["grippers"]["right_port"]:
+    if config["grippers"]["mode"] == "managed" and config["grippers"]["left_port"] == config["grippers"]["right_port"]:
         raise ValueError("left and right gripper ports must differ")
     if type(config["camera"]["serial"]) is not int or config["camera"]["serial"] <= 0:
         raise ValueError("camera serial must be a positive integer")
@@ -105,7 +127,7 @@ def load_hardware(path: Path, *, require_calibration=True) -> dict:
     if not calibration.is_absolute():
         calibration = path.resolve().parent / calibration
     config["camera"]["calibration"] = str(calibration.resolve(strict=require_calibration))
-    if os.environ.get("EBIM_CONTAINER_RUNTIME") == "1":
+    if os.environ.get("EBIM_CONTAINER_RUNTIME") == "1" and config["grippers"]["mode"] == "managed":
         config["grippers"].update(left_port="/dev/ebim-left-gripper", right_port="/dev/ebim-right-gripper")
     return config
 
@@ -115,7 +137,7 @@ def dds_xml(address: str) -> str:
     domain = ET.SubElement(root, "Domain", Id="any")
     general = ET.SubElement(domain, "General")
     interfaces = ET.SubElement(general, "Interfaces")
-    ET.SubElement(interfaces, "NetworkInterface", address=address)
+    ET.SubElement(interfaces, "NetworkInterface", **({"autodetermine": "true"} if address == "auto" else {"address": address}))
     return ET.tostring(root, encoding="unicode")
 
 
@@ -135,7 +157,7 @@ def bundle_files(config: dict) -> dict[str, bytes]:
     for role in ("arm", "base"):
         files[f"dds_{role}.xml"] = dds_xml(config["hosts"][role]["dds_address"]).encode()
     files["base_robot.yaml"] = json.dumps({"ROBOT1": {
-        "robot_type": "tmrv0_2", "namespace": "", "robot_ip": config["base"]["ip"],
+        "robot_type": "tmrv0_2", "namespace": "", "robot_ip": config["base"].get("ip", ""),
         "use_fake_hardware": "false", "use_rviz": "false",
     }}).encode()
     files["zed.yaml"] = json.dumps({"/**": {"ros__parameters": {
@@ -146,13 +168,22 @@ def bundle_files(config: dict) -> dict[str, bytes]:
     base = config["hosts"]["base"]
     files["base_env.sh"] = ("\n".join([
         "#!/usr/bin/env bash", "unset PYTHONPATH AMENT_PREFIX_PATH COLCON_PREFIX_PATH CMAKE_PREFIX_PATH LD_LIBRARY_PATH",
-        "export LD_LIBRARY_PATH=/opt/ebim-libfranka/lib:/usr/local/zed/lib:/usr/local/cuda/lib64",
+        *([] if config["deployment"] == "external" else [
+            "export LD_LIBRARY_PATH=/opt/ebim-libfranka/lib:/usr/local/zed/lib:/usr/local/cuda/lib64"]),
         *[f"source {shlex.quote(p)}" for p in [base["ros_setup"], *base["overlays"]]],
         f"export ROS_DOMAIN_ID={config['domains']['base']}",
         "export ROS_LOCALHOST_ONLY=0 ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET RMW_IMPLEMENTATION=rmw_cyclonedds_cpp",
         'export CYCLONEDDS_URI="file://$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/dds_base.xml"',
         "export PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1", "",
     ])).encode()
+    if config["deployment"] == "external":
+        mapping = yaml.safe_load((ROOT / "configs/tmr_rgb20d.yaml").read_text())
+        mapping["topics"]["head"] = config["camera"]["image_topic"]
+        mapping["topics"]["camera_info"] = config["camera"]["camera_info_topic"]
+        mapping["camera_intrinsics"] = "live_rectified"
+        for side in ("left", "right"):
+            mapping["topics"][side + "_pose"] = f"/franka_duo/measured/{side}_pose"
+        files["policy.yaml"] = yaml.safe_dump(mapping).encode()
     return files
 
 
@@ -196,6 +227,13 @@ class Orchestrator:
         return result.stdout
 
     def host(self, role, operation, *, activate=False):
+        if self.config["deployment"] == "external":
+            if role == "base":
+                return
+            command = ["/app/entrypoint.sh", "shell", "-c",
+                       shlex.join(["/app/.venv/bin/python", "/app/scripts/hardware/external.py", operation,
+                                   json.dumps(self.config), self.release] + (["--activate"] if activate else []))]
+            return self.execute("arm", command, timeout=None if operation.startswith("mission") else 420)
         if role == "base":
             return self.base_docker(operation)
         # Pass the stdlib-only helper directly so check/status need no deployment.
@@ -213,6 +251,16 @@ class Orchestrator:
                                     json.dumps(self.config), self.release], payload=payload, timeout=timeout)
 
     def plan(self):
+        if self.config["deployment"] == "external":
+            print(json.dumps({"release": self.release, "profile": self.config["profile"],
+                              "execution": "single Humble task container; attach over DDS",
+                              "domains": self.config["domains"], "image": self.config["image"],
+                              "components": {key: self.config[key]["mode"] for key in COMPONENTS},
+                              "camera": self.config["camera"], "base_container_required": False,
+                              "steps": ["read-only hardware graph check", "deploy local routes and policy",
+                                        "verify command ownership handoff", "start servo and route velocity adapter",
+                                        "run mission only with --execute"]}, indent=2))
+            return
         print(json.dumps({"release": self.release, "profile": self.config["profile"],
                           "execution": {"arm": "container-local", "base": "ssh-to-container"},
                           "hosts": self.config["hosts"], "image": self.config["image"],
@@ -224,7 +272,8 @@ class Orchestrator:
 
     def deploy(self):
         payload = archive(self.files)
-        self.base_docker("deploy", payload)
+        if self.config["deployment"] != "external":
+            self.base_docker("deploy", payload)
         for role in ("arm",):
             root = self.config["hosts"][role]["runtime_root"]
             # Extraction is into a new versioned directory, never the vendor workspace.
@@ -255,15 +304,20 @@ else:
             self.execute(role, ["/usr/bin/python3", "-B", "-c", code, root, self.release], payload=payload)
 
     def run(self, operation, activate=False, execute=False):
+        if self.config["deployment"] == "external" and activate:
+            raise ValueError("external deployment does not activate controllers; use up without --activate")
         if operation == "plan":
             return self.plan()
         if operation in ("check", "up"):
+            if self.config["deployment"] == "external":
+                self.deploy()
             for role in ("arm", "base"):
                 self.host(role, "check")
             if operation == "check":
                 return
         if operation == "up":
-            self.deploy()
+            if self.config["deployment"] != "external":
+                self.deploy()
             self.host("base", "up")
             self.host("arm", "up", activate=activate)
         elif operation == "status":

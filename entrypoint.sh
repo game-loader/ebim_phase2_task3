@@ -17,7 +17,7 @@ set -euo pipefail
 
 # ROS setup files probe optional unset variables; enable nounset after them.
 set +u
-source /opt/ros/jazzy/setup.bash
+source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
 if [[ -f /opt/ebim-drivers/install/setup.bash ]]; then
   source /opt/ebim-drivers/install/setup.bash
 fi
@@ -59,7 +59,7 @@ case "${mode}" in
     # spawns resolve them inside the image rather than in a source checkout.
     exec "${PY}" -m franka_duo_tele_data.table_mission \
       --arm-root /app \
-      --arm-env /opt/ros/jazzy/setup.bash \
+      --arm-env "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash" \
       --arm-python "${PY}" \
       --arm-overlay "${TABLE_MISSION_OVERLAY:-}" \
       --dataset "${TABLE_MISSION_CONTRACT}" \

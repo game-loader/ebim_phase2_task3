@@ -28,12 +28,15 @@ def generate_nodes(context):
     config, root = json.loads(path.read_text()), path.parent
     role = LaunchConfiguration("role").perform(context)
     nodes = []
-    if role == "servo":
+    if role in ("servo", "external-servo"):
         nodes.append(package_launch("franka_duo_joint_servo", "joint_servo.launch.py",
                                     playback_speed=config["runtime"]["playback_speed"], enable_gripper="true",
-                                    commit_lead_steps=0, idle_follow_timeout_s=60.0))
+                                    commit_lead_steps=0, idle_follow_timeout_s=60.0,
+                                    publish_measured_pose=str(role == "external-servo").lower()))
         nodes.append(package_launch("franka_duo_joint_servo", "gello_target_relay.launch.py",
                                     enable_robot="true", enable_gripper="true"))
+    elif role == "routes":
+        nodes.append(ExecuteProcess(cmd=["/usr/bin/python3", str(root / "base/tmr_base/scripts/cmd_vel_adapter.py")], output="screen"))
     elif role == "arm":
         if config["arms"]["mode"] == "managed":
             for side in ("left", "right"):

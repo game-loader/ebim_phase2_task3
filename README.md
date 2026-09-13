@@ -1,9 +1,14 @@
 # Franka Duo Mobile: Cup / Bowl Pick-and-Place
 
-This project assumes the target has the same two-host baseline as the reference
-system: an AMD64 arm host (`.100`) and a Jetson Orin base host (`.50`). Both
-hosts build the images from this repository; no reference image or filesystem
-is required.
+For the **Hamburg testbed**, use [the Hamburg deployment guide](docs/HAMBURG.md)
+and `hardware.hamburg.yaml`: one AMD64 ROS 2 Humble task container on the x86
+station, attached to the existing hardware graph on DDS domain 0. All hardware
+is external; no base container or ZED SDK is required. Command ownership must
+be handed over before execution as described in that guide.
+
+The build and hardware setup below describe the **Shanghai reference profile**
+(`hardware.yaml`): an AMD64 arm host (`.100`) and a Jetson Orin base host (`.50`).
+Both hosts build images from this repository; no reference filesystem is needed.
 
 ## Hardware prerequisites
 

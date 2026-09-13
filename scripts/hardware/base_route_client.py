@@ -5,6 +5,7 @@ import argparse
 import shlex
 import signal
 import subprocess
+import sys
 import time
 
 
@@ -43,6 +44,10 @@ def client(command):
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--local":
+        from pathlib import Path
+        return client([sys.executable, str(Path(__file__).with_name("base_route_watchdog.py")),
+                       "--local", sys.argv[2]])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("host")
     parser.add_argument("container")

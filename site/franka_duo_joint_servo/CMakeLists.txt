@@ -16,6 +16,7 @@ find_package(moveit_ros_planning REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(ruckig REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
 ament_python_install_package(${PROJECT_NAME})
@@ -30,6 +31,7 @@ ament_target_dependencies(policy_chunk_joint_servo
   moveit_ros_planning
   rclcpp
   sensor_msgs
+  geometry_msgs
   std_msgs
 )
 

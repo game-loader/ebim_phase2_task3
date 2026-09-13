@@ -36,8 +36,14 @@
 
 #include <Eigen/Geometry>
 
+#if __has_include(<moveit/robot_model_loader/robot_model_loader.hpp>)
 #include <moveit/robot_model_loader/robot_model_loader.hpp>
 #include <moveit/robot_state/robot_state.hpp>
+#else
+#include <moveit/robot_model_loader/robot_model_loader.h>
+#include <moveit/robot_state/robot_state.h>
+#endif
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <std_msgs/msg/float32.hpp>
@@ -257,6 +263,12 @@ class PolicyChunkJointServo final : public rclcpp::Node {
         create_publisher<std_msgs::msg::Float32>(right_gripper_topic_, rclcpp::QoS(10).reliable());
     status_publisher_ =
         create_publisher<std_msgs::msg::String>(status_topic_, rclcpp::QoS(10).reliable());
+    if (declare_parameter<bool>("publish_measured_pose", false)) {
+      left_pose_publisher_ = create_publisher<geometry_msgs::msg::PoseStamped>(
+          "/franka_duo/measured/left_pose", rclcpp::SensorDataQoS());
+      right_pose_publisher_ = create_publisher<geometry_msgs::msg::PoseStamped>(
+          "/franka_duo/measured/right_pose", rclcpp::SensorDataQoS());
+    }
   }
 
   ~PolicyChunkJointServo() override {
@@ -301,6 +313,8 @@ class PolicyChunkJointServo final : public rclcpp::Node {
     }
     state_ = std::make_unique<moveit::core::RobotState>(robot_model);
     state_->setToDefaultValues();
+    measured_state_ = std::make_unique<moveit::core::RobotState>(robot_model);
+    measured_state_->setToDefaultValues();
     left_midpoint_from_arm_base_ = transformFromRowMajor(kLeftMidpointFromArmBase);
     right_midpoint_from_arm_base_ = transformFromRowMajor(kRightMidpointFromArmBase);
 
@@ -369,6 +383,27 @@ class PolicyChunkJointServo final : public rclcpp::Node {
         }
         values[j] = *found;
       }
+    }
+    const auto& publisher = left ? left_pose_publisher_ : right_pose_publisher_;
+    if (publisher && measured_state_) {
+      const std::string side = left ? "left" : "right";
+      measured_state_->setJointGroupPositions(left ? left_group_ : right_group_, values.data());
+      measured_state_->update();
+      const Eigen::Isometry3d pose =
+          measured_state_->getGlobalLinkTransform(side + "_fr3v2_link0").inverse() *
+          measured_state_->getGlobalLinkTransform(side + "_fr3v2_link8");
+      const Eigen::Quaterniond rotation(pose.rotation());
+      geometry_msgs::msg::PoseStamped out;
+      out.header = message.header;
+      out.header.frame_id = side + "_fr3v2_link0";
+      out.pose.position.x = pose.translation().x();
+      out.pose.position.y = pose.translation().y();
+      out.pose.position.z = pose.translation().z();
+      out.pose.orientation.x = rotation.x();
+      out.pose.orientation.y = rotation.y();
+      out.pose.orientation.z = rotation.z();
+      out.pose.orientation.w = rotation.w();
+      publisher->publish(out);
     }
     std::lock_guard<std::mutex> lock(joints_mutex_);
     if (left) {
@@ -897,6 +932,9 @@ class PolicyChunkJointServo final : public rclcpp::Node {
   std::vector<std::string> left_joint_names_;
   std::vector<std::string> right_joint_names_;
   std::unique_ptr<moveit::core::RobotState> state_;
+  std::unique_ptr<moveit::core::RobotState> measured_state_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr left_pose_publisher_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr right_pose_publisher_;
   Eigen::Isometry3d left_midpoint_from_arm_base_{Eigen::Isometry3d::Identity()};
   Eigen::Isometry3d right_midpoint_from_arm_base_{Eigen::Isometry3d::Identity()};
 

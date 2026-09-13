@@ -1,0 +1,31 @@
+# Hamburg: one already-running Humble graph, no hardware drivers in this image.
+version: 1
+profile: tmr_fr3v2_duo
+deployment: external
+image: franka-duo-table-mission:hamburg
+hosts:
+  arm:
+    # Auto works on a single DDS interface; on a multi-NIC station set its LAN IP.
+    dds_address: auto
+domains:
+  arm: 0
+  base: 0
+arms:
+  mode: external
+grippers:
+  mode: external
+spine:
+  mode: external
+base:
+  mode: external
+lidars:
+  mode: external
+camera:
+  mode: external
+  serial: 13024307
+  calibration: configs/zed_pnp_calibration.json
+  image_topic: /head_camera/zed_node/rgb/color/rect/image
+  camera_info_topic: /head_camera/zed_node/rgb/color/rect/camera_info
+runtime:
+  playback_speed: 0.1
+  ready_timeout_s: 120

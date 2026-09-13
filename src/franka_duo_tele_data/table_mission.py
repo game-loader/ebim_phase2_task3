@@ -153,6 +153,7 @@ class MissionConfig:
     base_env: str = ""
     base_container: str = ""
     base_release: str = ""
+    base_local: bool = False
 
 
 def emit(event: str, **values) -> None:
@@ -403,6 +404,11 @@ def build_remote_base_shell(config: MissionConfig, run_id: str, mission: str | N
 
 
 def build_base_argv(config: MissionConfig, run_id: str, mission: str | None = None) -> list[str]:
+    if config.base_local:
+        if not config.base_env:
+            raise ValueError("local base routes require an explicit environment file")
+        return [sys.executable, str(Path(__file__).resolve().parents[2] / "scripts/hardware/base_route_client.py"),
+                "--local", build_remote_base_shell(config, run_id, mission)]
     if config.base_container:
         if not config.base_release:
             raise ValueError("base container routes require a release identifier")
@@ -667,7 +673,7 @@ def strategy(config: MissionConfig, checkpoint_path: Path, args=None) -> dict:
     return {
         "status": "dry_run",
         "motion_enabled": False,
-        "base_host": config.base_host,
+        "base_host": "container-local" if config.base_local else config.base_host,
         "travel_spine_m": TRAVEL_HEIGHT_M,
         "grasp_spine_m": GRASP_HEIGHT_M,
         "letter_table_z": letter_z,
@@ -676,7 +682,8 @@ def strategy(config: MissionConfig, checkpoint_path: Path, args=None) -> dict:
         "steps": [
             "initialize both arms into the travel posture inside the navigation footprint",
             f"raise spine to {TRAVEL_HEIGHT_M:.3f} m and verify it before departing",
-            "run the base route to the table over SSH and require FINAL_STOP",
+            ("run the base route locally and require FINAL_STOP" if config.base_local else
+             "run the base route to the table over SSH and require FINAL_STOP"),
             f"cup stage: lower spine to {GRASP_HEIGHT_M:.3f} m, clear view, detect, pose up, grasp",
             f"bowl stage: lower spine to {GRASP_HEIGHT_M:.3f} m, clear view, detect, pose up, grasp",
             f"raise spine to {TRAVEL_HEIGHT_M:.3f} m, then carry both objects to the letter side",
@@ -899,6 +906,7 @@ def main(argv=None) -> int:
     parser.add_argument("--base-root", default="/home/tmr-user/tmr_base")
     parser.add_argument("--base-env", default="", help="deployed base environment file; empty uses legacy host workspaces")
     parser.add_argument("--base-container", default="", help="base Docker container name")
+    parser.add_argument("--base-local", action="store_true", help="run bundled routes in this task container")
     parser.add_argument("--base-release", default="", help="base runtime release identifier")
     parser.add_argument("--arm-root", type=Path, default=Path.cwd())
     parser.add_argument("--arm-env", default=str(Path.home() / "tmr_env.sh"))
@@ -965,6 +973,7 @@ def main(argv=None) -> int:
         base_root=args.base_root,
         base_env=args.base_env,
         base_container=args.base_container,
+        base_local=args.base_local,
         base_release=args.base_release,
         arm_root=str(args.arm_root.resolve()),
         arm_env=args.arm_env,

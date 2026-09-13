@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 from dataclasses import dataclass
 
 SWITCH_ON_SERVICE = "/franka_spine_node/switch_on"
@@ -106,7 +107,8 @@ def move_spine(node, motion: SpineMotion, *, tolerance_m: float = POSITION_TOLER
     from franka_spine_msgs.srv import GetPosition, SwitchOn
     from rclpy.action import ActionClient
 
-    switch_on = node.create_client(SwitchOn, SWITCH_ON_SERVICE)
+    external = os.environ.get("EBIM_EXTERNAL_HARDWARE") == "1"
+    switch_on = None if external else node.create_client(SwitchOn, SWITCH_ON_SERVICE)
     get_position = node.create_client(GetPosition, GET_POSITION_SERVICE)
     move = ActionClient(node, MoveAbsolute, MOVE_ABSOLUTE_ACTION)
 
@@ -126,9 +128,10 @@ def move_spine(node, motion: SpineMotion, *, tolerance_m: float = POSITION_TOLER
         return float(response.position)
 
     start = position()
-    switched = call(switch_on, SwitchOn.Request(), SWITCH_ON_SERVICE)
-    if not switched.success:
-        raise RuntimeError(f"spine switch-on failed: {switched.message}")
+    if switch_on is not None:
+        switched = call(switch_on, SwitchOn.Request(), SWITCH_ON_SERVICE)
+        if not switched.success:
+            raise RuntimeError(f"spine switch-on failed: {switched.message}")
     if not move.wait_for_server(timeout_sec=5.0):
         raise RuntimeError("spine move action unavailable")
 
