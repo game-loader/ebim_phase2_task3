@@ -11,6 +11,7 @@ import hashlib
 import io
 import ipaddress
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -121,6 +122,11 @@ def load_hardware(path: Path, *, require_calibration=True) -> dict:
         raise ValueError("playback_speed must be in (0, 1]")
     if not 10 <= float(config["runtime"]["ready_timeout_s"]) <= 300:
         raise ValueError("ready_timeout_s must be in [10, 300]")
+    for key, default in (("alignment_tolerance_rad", 0.003), ("max_tracking_error_rad", 0.15)):
+        value = config["runtime"].setdefault(key, default)
+        if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            raise ValueError(f"runtime.{key} must be a finite positive number in radians")
+        config["runtime"][key] = float(value)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./:@-]*", config["image"]):
         raise ValueError("invalid Docker image reference")
     calibration = Path(os.environ.get("EBIM_CALIBRATION", config["camera"]["calibration"]))
@@ -275,6 +281,7 @@ class Orchestrator:
                               "domains": self.config["domains"], "image": self.config["image"],
                               "components": {key: self.config[key]["mode"] for key in COMPONENTS},
                               "camera": self.config["camera"], "base_container_required": False,
+                              "runtime": self.config["runtime"],
                               "steps": ["start fixed DDS gateway before arm Move mode", "read-only hardware graph check",
                                         "deploy local routes and policy", "verify command ownership handoff",
                                         "configure impedance if unconfigured", "start servo and route velocity adapter",

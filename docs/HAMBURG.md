@@ -132,6 +132,47 @@ Logs are available using `bash scripts/docker_hardware.sh logs` and
 `/app/runtime/logs/` inside the runtime. Existing target streams remain alive
 after mission errors; accepted trajectory chunks may finish before holding.
 
+## Motion guard configuration
+
+Hamburg's hold error and initial travel-stow transient can be accommodated in
+`hardware.hamburg.yaml`, without editing Python or C++:
+
+```yaml
+runtime:
+  playback_speed: 0.1
+  alignment_tolerance_rad: 0.01
+  max_tracking_error_rad: 0.2
+  ready_timeout_s: 120
+```
+
+`alignment_tolerance_rad` limits the maximum absolute joint target/state
+difference during both activation and mission readiness. Hamburg reported a
+steady-state error of 0.003076 rad; the supplied profile uses 0.01 rad.
+`max_tracking_error_rad` is the C++ servo's maximum joint tracking error during
+motion. The supplied profile uses 0.2 rad, the lower end of Hamburg's requested
+0.2–0.4 rad range; the operator can set another finite positive value after
+evaluating the rig. These are thresholds, not speed controls. Errors above the
+configured limits still reject alignment or latch a servo fault. Profiles that
+omit these fields retain the original 0.003 and 0.15 rad defaults.
+
+Use `playback_speed` to slow the trajectory. Reducing `max_joint_velocity_rad_s`
+can reject a chunk that exceeds its velocity bound; it does not retime it.
+
+The image must be rebuilt once after updating to this implementation. Later
+threshold changes require only a YAML edit and a runtime restart. Shut down
+the current runtime with `bash scripts/docker_hardware.sh down` first; ensure
+the arms are out of Move mode, edit the YAML, then run:
+
+```bash
+bash scripts/docker_hardware.sh plan --hardware hardware.hamburg.yaml
+bash scripts/docker_hardware.sh check --hardware hardware.hamburg.yaml
+bash scripts/docker_hardware.sh up --hardware hardware.hamburg.yaml --activate
+bash scripts/docker_hardware.sh mission --execute
+```
+
+`plan` shows the effective runtime values. Editing the host YAML does not change
+an already running container or recover a latched servo fault.
+
 ## Camera and routes
 
 SN13024307 uses its **live CameraInfo**. For the rectified image, a valid

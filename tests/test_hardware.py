@@ -149,6 +149,22 @@ def test_activation_alignment_reorders_measured_but_rejects_reordered_target():
         alignment.alignment_error(target, measured, "left")
 
 
+def test_configurable_alignment_keeps_a_finite_guard():
+    alignment = load_helper("alignment")
+    names = [f"left_fr3v2_joint{i}" for i in range(1, 8)]
+    target = SimpleNamespace(name=names, position=[0.003076] * 7)
+    measured = SimpleNamespace(name=names, position=[0.] * 7)
+    with pytest.raises(RuntimeError, match="tolerance 0.003000"):
+        alignment.alignment_error(target, measured, "left")
+    assert alignment.alignment_error(target, measured, "left", 0.01) == pytest.approx(0.003076)
+    target.position[0] = 0.010001
+    with pytest.raises(RuntimeError, match="tolerance 0.010000"):
+        alignment.alignment_error(target, measured, "left", 0.01)
+    for invalid in (0, -1, float("nan"), float("inf"), True):
+        with pytest.raises(ValueError):
+            alignment.alignment_error(target, measured, "left", invalid)
+
+
 def test_host_refuses_unmanaged_drivers_without_killing(config, tmp_path, monkeypatch):
     helper = load_helper("host")
     config["hosts"]["base"]["runtime_root"] = str(tmp_path)
@@ -226,6 +242,7 @@ def activation_probe():
                  "alignment_error": load_helper("alignment").alignment_error}
     exec(compile(ast.Module(body=[definition], type_ignores=[]), "probe.py", "exec"), namespace)
     probe = namespace["Probe"].__new__(namespace["Probe"])
+    probe.config = {"runtime": {}}
     probe.runtime_ready = Mock()
     probe.controllers = Mock(return_value={"joint_impedance_controller": "inactive"})
     probe.inactive = Mock()

@@ -1,4 +1,5 @@
 import ast
+import ast
 import importlib.util
 import json
 import shlex
@@ -20,6 +21,70 @@ from franka_duo_tele_data.table_mission import MissionConfig, build_base_argv
 @pytest.fixture
 def hamburg():
     return load_hardware(ROOT / "hardware.hamburg.yaml")
+
+
+@pytest.mark.parametrize("key", ["alignment_tolerance_rad", "max_tracking_error_rad"])
+@pytest.mark.parametrize("value", [0, -0.1, float("nan"), float("inf"), True, "0.2", None])
+def test_invalid_motion_guard_rejected_before_ros(tmp_path, key, value):
+    raw = yaml.safe_load((ROOT / "hardware.hamburg.yaml").read_text())
+    raw["runtime"][key] = value
+    path = tmp_path / "hardware.yaml"
+    path.write_text(yaml.safe_dump(raw))
+    with pytest.raises(ValueError, match=key):
+        load_hardware(path, require_calibration=False)
+
+
+def test_motion_guard_defaults_and_overrides(tmp_path, hamburg):
+    legacy = load_hardware(ROOT / "hardware.yaml")
+    assert legacy["runtime"]["alignment_tolerance_rad"] == 0.003
+    assert legacy["runtime"]["max_tracking_error_rad"] == 0.15
+    assert hamburg["runtime"]["alignment_tolerance_rad"] == 0.01
+    assert hamburg["runtime"]["max_tracking_error_rad"] == 0.2
+    raw = yaml.safe_load((ROOT / "hardware.hamburg.yaml").read_text())
+    raw["runtime"]["max_tracking_error_rad"] = 0.4
+    path = tmp_path / "hardware.yaml"
+    path.write_text(yaml.safe_dump(raw))
+    config = load_hardware(path, require_calibration=False)
+    assert config["runtime"]["max_tracking_error_rad"] == 0.4
+    config["camera"]["calibration"] = str(ROOT / "configs/zed_pnp_calibration.json")
+    assert Orchestrator(config).release != Orchestrator(hamburg).release
+
+
+@pytest.mark.parametrize("operation", ["activate_impedance", "mission_ready"])
+@pytest.mark.parametrize("error, accepted", [(0.003076, True), (0.02, False)])
+def test_external_alignment_uses_config_at_activation_and_mission(operation, error, accepted):
+    from types import SimpleNamespace
+
+    spec = importlib.util.spec_from_file_location("alignment", ROOT / "scripts/hardware/alignment.py")
+    alignment = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(alignment)
+    tree = ast.parse((ROOT / "scripts/hardware/external_probe.py").read_text())
+    definition = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "ExternalProbe")
+    namespace = {"Probe": object, "SIDES": ("left", "right"), "alignment_error": alignment.alignment_error}
+    exec(compile(ast.Module(body=[definition], type_ignores=[]), "external_probe.py", "exec"), namespace)
+    probe = namespace["ExternalProbe"]()
+    probe.config = {"runtime": {"alignment_tolerance_rad": 0.01}}
+    probe.runtime_ready = Mock()
+    probe.servo_status = Mock(return_value={"idle_latched": True})
+    probe.wait = lambda predicate, *args: predicate()
+    probe.fresh = lambda *args: True
+    probe.controllers = Mock(return_value={"joint_impedance_controller": "active"})
+    probe.switch = Mock()
+    probe.deactivate_impedance = Mock()
+    probe.latest = {}
+    for side in ("left", "right"):
+        names = [f"{side}_fr3v2_joint{i}" for i in range(1, 8)]
+        probe.latest[f"/{side}/gello/joint_states"] = (SimpleNamespace(name=names, position=[error] * 7), 0)
+        probe.latest[f"/{side}/franka_robot_state_broadcaster/measured_joint_states"] = (
+            SimpleNamespace(name=names, position=[0.] * 7), 0)
+    if accepted:
+        getattr(probe, operation)()
+        if operation == "activate_impedance":
+            assert probe.switch.call_count == 2
+    else:
+        with pytest.raises(RuntimeError, match="tolerance 0.010000"):
+            getattr(probe, operation)()
+        probe.switch.assert_not_called()
 
 
 def test_external_plan_never_connects_and_needs_no_hardware_addresses(hamburg, monkeypatch, capsys):

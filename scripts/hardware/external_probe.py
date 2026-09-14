@@ -161,7 +161,8 @@ class ExternalProbe(Probe):
                 measured = f"/{side}/franka_robot_state_broadcaster/measured_joint_states"
                 self.wait(lambda target=target, measured=measured:
                           self.fresh(target, 0.15) and self.fresh(measured, 0.15), "fresh activation target")
-                alignment_error(self.latest[target][0], self.latest[measured][0], side)
+                alignment_error(self.latest[target][0], self.latest[measured][0], side,
+                                self.config["runtime"].get("alignment_tolerance_rad", 0.003))
                 self.switch(side, True)
                 if self.controllers(side).get("joint_impedance_controller") != "active":
                     raise RuntimeError(side + " activation did not reach active")
@@ -178,7 +179,8 @@ class ExternalProbe(Probe):
             topics = [f"/{side}/gello/joint_states", f"/{side}/franka_robot_state_broadcaster/measured_joint_states"]
             self.wait(lambda topics=topics: all(self.fresh(t, 0.2) for t in topics), "fresh aligned joints")
             alignment_error(self.latest[f"/{side}/gello/joint_states"][0],
-                            self.latest[f"/{side}/franka_robot_state_broadcaster/measured_joint_states"][0], side)
+                            self.latest[f"/{side}/franka_robot_state_broadcaster/measured_joint_states"][0], side,
+                            self.config["runtime"].get("alignment_tolerance_rad", 0.003))
 
 
 def main():

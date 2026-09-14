@@ -23,7 +23,7 @@ from rclpy.action import ActionServer
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image, JointState, LaserScan
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, String
 from tf2_msgs.msg import TFMessage
 
 from franka_duo_tele_data.hardware import ROOT, Orchestrator, load_hardware
@@ -115,6 +115,7 @@ class MockHardware:
             self.services.append(self.node.create_service(
                 ConfigureController, f"/{side}/controller_manager/configure_controller", partial(self.configure, side)))
         self.listen(TwistStamped, "/swerve_drive_controller/cmd_vel")
+        self.listen(String, "/franka_duo/joint_servo/status")
         self.add(Odometry, "/swerve_drive_controller/odom", Odometry())
         for side in ("front", "rear"):
             scan = LaserScan()
@@ -290,6 +291,19 @@ def main():
         assert sorted(hardware.node.get_node_names_and_namespaces()) == nodes_before
         print("SMOKE: stage processes used the gateway without adding ROS nodes", flush=True)
         print("SMOKE: mission readiness and dry plan passed with live-camera/local-route config", flush=True)
+        # A stationary chunk leaves the target fixed. Inject measured offsets
+        # to prove the configured tracking guard allows 0.18 but rejects 0.22.
+        status_topic = "/franka_duo/joint_servo/status"
+        original = hardware.joints["left"].position[0]
+        hardware.joints["left"].position[0] = original + 0.18
+        def status():
+            return json.loads(hardware.received[status_topic].data)
+        wait_for(lambda: 0.17 < status()["tracking_error_rad"] < 0.19)
+        assert not status()["fault"]
+        hardware.joints["left"].position[0] = original + 0.22
+        wait_for(lambda: status()["fault"])
+        assert "tracking" in status()["fault_reason"]
+        print("SMOKE: configured 0.2 rad tracking guard accepted 0.18 and faulted at 0.22", flush=True)
         host.down()
         assert not any(hardware.active.values())
         assert not host.state["processes"]

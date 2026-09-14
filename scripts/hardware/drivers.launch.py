@@ -31,6 +31,7 @@ def generate_nodes(context):
     if role in ("servo", "external-servo"):
         nodes.append(package_launch("franka_duo_joint_servo", "joint_servo.launch.py",
                                     playback_speed=config["runtime"]["playback_speed"], enable_gripper="true",
+                                    max_tracking_error_rad=config["runtime"].get("max_tracking_error_rad", 0.15),
                                     commit_lead_steps=0, idle_follow_timeout_s=60.0,
                                     publish_measured_pose=str(role == "external-servo").lower()))
         nodes.append(package_launch("franka_duo_joint_servo", "gello_target_relay.launch.py",

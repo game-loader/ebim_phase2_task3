@@ -11,6 +11,7 @@ import numpy as np
 import rclpy
 import yaml
 from geometry_msgs.msg import PoseStamped, TwistStamped
+from rcl_interfaces.srv import GetParameters
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import Float32MultiArray, MultiArrayDimension, String
@@ -48,6 +49,12 @@ def main():
     assert abs(matrix[0, 0] - 386.9749396123877) < 1e-8
     assert latest["left_pose"].header.frame_id == "base"
     check_joint_servo_controllers(node, config, 0.1)
+    hardware = json.loads(Path(os.environ["EBIM_HARDWARE_CONFIG"]).read_text())
+    client = node.create_client(GetParameters, "/franka_duo_joint_servo/get_parameters")
+    future = client.call_async(GetParameters.Request(names=["max_tracking_error_rad"]))
+    ros.spin_until_future_complete(node, future, timeout_sec=5)
+    assert future.done()
+    assert future.result().values[0].double_value == hardware["runtime"]["max_tracking_error_rad"]
     # Exercise the real task -> socket -> DDS -> C++ IK/servo command path
     # with a stationary TCP chunk, avoiding mock arm dynamics.
     node.create_subscription(String, config["joint_servo_status_topic"],

@@ -279,7 +279,8 @@ class Probe:
             target = f"/{side}/gello/joint_states"
             measured = f"/{side}/franka_robot_state_broadcaster/measured_joint_states"
             self.wait(lambda: self.fresh(target, 0.2) and self.fresh(measured, 0.2), "live activation alignment", 5)
-            alignment_error(self.latest[target][0], self.latest[measured][0], side)
+            alignment_error(self.latest[target][0], self.latest[measured][0], side,
+                            self.config["runtime"].get("alignment_tolerance_rad", 0.003))
             subprocess.run(["ros2", "control", "switch_controllers", "-c", f"/{side}/controller_manager",
                             "--activate", "joint_impedance_controller"], check=True, timeout=30)
             self.errors_and_mode(side, 2)
