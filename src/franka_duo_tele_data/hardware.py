@@ -50,6 +50,11 @@ def load_hardware(path: Path, *, require_calibration=True) -> dict:
             raise ValueError(f"{component}.mode must be managed or external")
         if local and config[component]["mode"] != "external":
             raise ValueError("external deployment requires all hardware modes to be external")
+    command_mode = config["arms"].setdefault("command_mode", "absolute")
+    if command_mode not in ("absolute", "gello_relative"):
+        raise ValueError("arms.command_mode must be absolute or gello_relative")
+    if command_mode == "gello_relative" and not local:
+        raise ValueError("gello_relative requires external deployment and its activation handshake")
     if local:
         config.setdefault("hosts", {}).setdefault("arm", {"dds_address": "auto"})
         config["hosts"]["base"] = {"dds_address": config["hosts"]["arm"]["dds_address"]}
@@ -205,6 +210,7 @@ def bundle_files(config: dict) -> dict[str, bytes]:
         mapping["topics"]["head"] = config["camera"]["image_topic"]
         mapping["topics"]["camera_info"] = config["camera"]["camera_info_topic"]
         mapping["camera_intrinsics"] = "live_rectified"
+        mapping["gello_command_mode"] = config["arms"]["command_mode"]
         # Organizer confirms current_pose is TCP in the corresponding arm link0,
         # despite header.frame_id being 'base'. Do not add a tool offset again.
         files["policy.yaml"] = yaml.safe_dump(mapping).encode()
@@ -282,6 +288,7 @@ class Orchestrator:
                               "components": {key: self.config[key]["mode"] for key in COMPONENTS},
                               "camera": self.config["camera"], "base_container_required": False,
                               "runtime": self.config["runtime"],
+                              "arm_command_mode": self.config["arms"]["command_mode"],
                               "steps": ["start fixed DDS gateway before arm Move mode", "read-only hardware graph check",
                                         "deploy local routes and policy", "verify command ownership handoff",
                                         "configure impedance if unconfigured", "start servo and route velocity adapter",

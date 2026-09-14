@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 import xml.etree.ElementTree as ET
-from functools import partial
+from functools import lru_cache, partial
 
 import cv2
 import numpy as np
@@ -33,10 +33,15 @@ sys.path.insert(0, str(ROOT / "scripts/hardware"))
 from external import ExternalHost
 
 
+@lru_cache(maxsize=1)
+def robot_model():
+    return ET.parse(ROOT / "site/franka_duo_joint_servo/model/robot.urdf").getroot()
+
+
 def expected_tcp(side, positions):
     # Independent URDF chain evaluation catches omitted tool offsets and
     # offsets incorrectly applied along world Z instead of the rotated tip Z.
-    robot = ET.parse(ROOT / "site/franka_duo_joint_servo/model/robot.urdf").getroot()
+    robot = robot_model()
     pose = np.eye(4)
     for index in range(1, 9):
         joint = robot.find(f"joint[@name='{side}_fr3v2_joint{index}']")
@@ -75,6 +80,9 @@ class MockHardware:
         self.target_times = {"left": [], "right": []}
         self.position = 0.4
         self.received = {}
+        self.robot_reference, self.gello_reference = {}, {}
+        self.follow = True
+        self.poses = {}
         self.base_commands = []
         self.publishers = []
         self.previous = []
@@ -89,6 +97,7 @@ class MockHardware:
                 joints.position = reference["provenance"]["right"]["measured_q"]
             self.joints[side] = joints
             pose = PoseStamped()
+            self.poses[side] = pose
             pose.header.frame_id = "base"
             _, tcp = expected_tcp(side, joints.position)
             pose.pose.position.x, pose.pose.position.y, pose.pose.position.z = tcp[:3, 3]
@@ -106,6 +115,8 @@ class MockHardware:
             target = f"/{side}/gello/joint_states"
             self.previous.append((self.node.create_publisher(JointState, target, 10), joints))
             self.listen(JointState, target)
+            self.listen(JointState, f"/franka_duo/joint_servo/{side}/target")
+            self.listen(String, f"/{side}_gello_target_relay/mapping_status")
             self.listen(Float32, f"/{side}/gripper/gripper_client/target_gripper_width_percent")
             self.listen(PoseStamped, f"/franka_duo/measured/{side}_pose", qos_profile_sensor_data)
             self.services.append(self.node.create_service(
@@ -146,7 +157,8 @@ class MockHardware:
         self.static_tf.publish(TFMessage(transforms=transforms))
         self.services.append(self.node.create_service(GetPosition, "/franka_spine_node/get_position", self.get_position))
         self.action = ActionServer(self.node, MoveAbsolute, "/franka_spine_node/move_absolute", self.move)
-        self.timer = self.node.create_timer(0.01, self.publish)
+        self.tick = 0
+        self.timer = self.node.create_timer(0.02, self.publish)
 
     def add(self, kind, topic, message):
         self.publishers.append((self.node.create_publisher(kind, topic, 10), message))
@@ -161,8 +173,35 @@ class MockHardware:
         self.node.create_subscription(kind, topic, receive, qos)
 
     def publish(self):
+        self.tick += 1
+        # Model the organizer's controller, including independent activation
+        # references and a bounded rate limiter. Never treat GELLO as absolute.
+        for side, reference in self.robot_reference.items():
+            if not self.active[side]:
+                continue
+            if time.monotonic() - self.target_times[side][-1] > 0.5:
+                self.active[side] = False
+                continue
+            if not self.follow:
+                continue
+            message = self.received[f"/{side}/gello/joint_states"]
+            by_name = dict(zip(message.name, message.position, strict=True))
+            gello = np.array([by_name[n] for n in self.joints[side].name])
+            goal = reference + np.array([-1, -1, 1, 1, 1, 1, -1]) * (gello - self.gello_reference[side])
+            current = np.array(self.joints[side].position)
+            self.joints[side].position = (current + np.clip(goal - current, -0.008, 0.008)).tolist()
+            pose = self.poses[side]
+            _, tcp = expected_tcp(side, self.joints[side].position)
+            pose.pose.position.x, pose.pose.position.y, pose.pose.position.z = tcp[:3, 3]
+            vector = cv2.Rodrigues(tcp[:3, :3])[0].ravel()
+            angle = np.linalg.norm(vector)
+            xyz = vector / angle * np.sin(angle / 2)
+            pose.pose.orientation.x, pose.pose.orientation.y, pose.pose.orientation.z = xyz
+            pose.pose.orientation.w = float(np.cos(angle / 2))
         stamp = self.node.get_clock().now().to_msg()
         for publisher, message in self.publishers + self.previous:
+            if isinstance(message, (Image, CameraInfo)) and self.tick % 3:
+                continue
             message.header.stamp = stamp
             publisher.publish(message)
 
@@ -182,6 +221,13 @@ class MockHardware:
         if request.activate_controllers:
             assert self.configured[side]
             assert time.monotonic() - self.target_times[side][-1] < 0.5
+            self.robot_reference[side] = np.array(self.joints[side].position)
+            message = self.received[f"/{side}/gello/joint_states"]
+            by_name = dict(zip(message.name, message.position, strict=True))
+            self.gello_reference[side] = np.array([by_name[n] for n in self.joints[side].name])
+            np.testing.assert_allclose(self.robot_reference[side], self.gello_reference[side], atol=1e-9)
+            relay = json.loads(self.received[f"/{side}_gello_target_relay/mapping_status"].data)
+            assert relay["state"] == "reference_held"
             self.active[side] = True
         elif self.refuse_stop:
             response.ok = False
@@ -234,10 +280,14 @@ def main():
         host.check()
         print("SMOKE: check accepted existing publishers without starting a task", flush=True)
         assert not host.state["processes"]
-        reject(lambda: host.up(False))
-        assert set(host.state["processes"]) == {"gateway"}
-        hardware.active = dict.fromkeys(hardware.active, False)
-        reject(lambda: host.up(False))
+        try:
+            host.up(False)
+        except RuntimeError as error:
+            assert "up --activate" in str(error)
+        else:
+            raise AssertionError("relative handoff allowed operator activation without reference synchronization")
+        assert not host.state["processes"]
+        reject(lambda: host.up(True))
         assert set(host.state["processes"]) == {"gateway"}
         def handoff():
             for publisher, _ in hardware.previous:
@@ -285,25 +335,40 @@ def main():
         hardware.node.destroy_publisher(route_pub)
         host.probe("mission-ready")
         host.native(["/app/.venv/bin/python", "/app/tests/hamburg_gateway_phase_smoke.py"], timeout=60)
+        # The moving chunk must reach robot-space targets with the signed
+        # relative mapping; a stationary-only smoke test cannot catch this bug.
+        for side in ("left", "right"):
+            target = np.array(hardware.received[f"/franka_duo/joint_servo/{side}/target"].position)
+            wait_for(lambda side=side, target=target:
+                     np.max(np.abs(np.array(hardware.joints[side].position) - target)) < 0.001)
+            encoded = np.array(hardware.received[f"/{side}/gello/joint_states"].position)
+            reconstructed = hardware.robot_reference[side] + np.array([-1, -1, 1, 1, 1, 1, -1]) * (
+                encoded - hardware.gello_reference[side])
+            np.testing.assert_allclose(reconstructed, target, atol=1e-6)
+            assert np.max(np.abs(target - hardware.robot_reference[side])) > 0.003
+            assert np.max(np.abs(encoded[[0, 1, 6]] - target[[0, 1, 6]])) > 0.003
+        host.probe("mission-ready")
+        print("SMOKE: moving TCP chunk reached both absolute targets through relative GELLO", flush=True)
         wait_for(lambda: any(abs(x - 0.02) < 1e-6 for x in hardware.base_commands))
         wait_for(lambda: hardware.base_commands[-1] == 0.)
         host.mission(False)
         assert sorted(hardware.node.get_node_names_and_namespaces()) == nodes_before
         print("SMOKE: stage processes used the gateway without adding ROS nodes", flush=True)
         print("SMOKE: mission readiness and dry plan passed with live-camera/local-route config", flush=True)
-        # A stationary chunk leaves the target fixed. Inject measured offsets
-        # to prove the configured tracking guard allows 0.18 but rejects 0.22.
+        # Retain the configurable guard regression independently of mapping.
+        hardware.follow = False
         status_topic = "/franka_duo/joint_servo/status"
         original = hardware.joints["left"].position[0]
-        hardware.joints["left"].position[0] = original + 0.18
+        limit = config["runtime"]["max_tracking_error_rad"]
+        hardware.joints["left"].position[0] = original + limit - 0.02
         def status():
             return json.loads(hardware.received[status_topic].data)
-        wait_for(lambda: 0.17 < status()["tracking_error_rad"] < 0.19)
+        wait_for(lambda: limit - 0.03 < status()["tracking_error_rad"] < limit - 0.01)
         assert not status()["fault"]
-        hardware.joints["left"].position[0] = original + 0.22
+        hardware.joints["left"].position[0] = original + limit + 0.02
         wait_for(lambda: status()["fault"])
         assert "tracking" in status()["fault_reason"]
-        print("SMOKE: configured 0.2 rad tracking guard accepted 0.18 and faulted at 0.22", flush=True)
+        print(f"SMOKE: tracking guard {limit} rad remains enforced", flush=True)
         host.down()
         assert not any(hardware.active.values())
         assert not host.state["processes"]

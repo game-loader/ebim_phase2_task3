@@ -25,7 +25,7 @@ Both `domains.arm` and `domains.base` are `0`.
 
 | Function | External interface | Type / semantics |
 | --- | --- | --- |
-| Arm commands | `/{left,right}/gello/joint_states` | `sensor_msgs/msg/JointState`, joint impedance targets |
+| Arm commands | `/{left,right}/gello/joint_states` | `sensor_msgs/msg/JointState`, relative GELLO coordinates encoded by the relay |
 | Arm state | `/{left,right}/franka_robot_state_broadcaster/measured_joint_states` | `sensor_msgs/msg/JointState` |
 | Gripper commands | `/{left,right}/gripper/gripper_client/target_gripper_width_percent` | `std_msgs/msg/Float32`, open `0.8`, closed `0.0` |
 | Gripper state | `/{left,right}/gripper/joint_states` | `sensor_msgs/msg/JointState` |
@@ -43,6 +43,28 @@ joint arrays are matched by name. Outgoing commands pair names and positions,
 use RELIABLE/VOLATILE QoS and are published at **20 Hz**. The internal trajectory
 servo remains at 1000 Hz. An independent relay maintains the last target on
 input loss; no command gap may exceed the organizer's **0.5 s** timeout.
+
+The Hamburg profile selects `arms.command_mode: gello_relative`. Its controller
+captures robot and GELLO references at activation and uses
+`q_goal = robot_ref + D * (gello - gello_ref)`, with
+`D = [-1, -1, 1, 1, 1, 1, -1]`. Consequently `/gello` is **not** an absolute
+robot-space joint command. For each absolute servo target `T`, the relay emits
+`gello = q0 + D * (T - q0)` using its frozen activation reference `q0`.
+
+Before activation the relay publishes only measured joints, even if a distant
+servo target arrives. The startup handshake latches fresh measured `q0` while
+impedance is inactive and holds `gello = q0` at 20 Hz through activation. It
+checks alignment immediately before and after switching; drift beyond
+`alignment_tolerance_rad` aborts startup. Both arms must activate successfully
+before mapped targets are enabled. Reference drift within the alignment
+tolerance remains the accuracy limit of this measured-reference handshake.
+
+The reference is immutable for that runtime. Later phases never rebase it, and
+repeat prepare/enable requests are rejected. Do not independently reactivate
+the controller with the same relay: use `down` followed by `up --activate` to
+capture a new reference. All mapping service clients and status subscriptions
+are created in the resident gateway before activation. Profiles without this
+mode retain absolute passthrough behavior.
 
 The mission now reads the organizer's
 `/{left,right}/franka_robot_state_broadcaster/current_pose` directly as
@@ -86,10 +108,9 @@ ROS endpoints. They never initialize DDS. Status, readiness, controller
 switching and spine action requests use the same gateway. No ROS CLI is used
 for controller switching, and no gateway is recreated while target streams exist.
 
-1. With impedance deactivated and the arms out of Move mode, the organizer
-   stops existing arm, gripper and base command publishers.
-   Their pause/resume interface remains unspecified; this container does not
-   kill organizer processes. Occupied robot command topics block startup.
+1. The organizer confirmed zero existing arm, gripper and base command
+   publishers, and both arms out of Move mode before `check`. Occupied command
+   topics still block startup if another publisher subsequently appears.
 2. Start and activate through the existing controller managers:
 
    ```bash
@@ -104,8 +125,9 @@ for controller switching, and no gateway is recreated while target streams exist
    activating. If configure is unavailable, the organizer must pre-configure
    both controllers as `inactive`. Both broadcasters stay active throughout.
    A partial activation failure triggers deactivation; streams remain alive.
-   Without `--activate`, startup prepares the target streams and leaves
-   impedance inactive for an operator-controlled handoff.
+   In `gello_relative` mode, `--activate` is required so the relay reference
+   handshake cannot be bypassed. Mission readiness checks the absolute servo
+   targets against measured joints, not the encoded `/gello` coordinates.
 3. Run a dry plan, then explicitly execute:
 
    ```bash
@@ -134,14 +156,14 @@ after mission errors; accepted trajectory chunks may finish before holding.
 
 ## Motion guard configuration
 
-Hamburg's hold error and initial travel-stow transient can be accommodated in
-`hardware.hamburg.yaml`, without editing Python or C++:
+Motion thresholds remain configurable in `hardware.hamburg.yaml`, without
+editing Python or C++:
 
 ```yaml
 runtime:
   playback_speed: 0.1
   alignment_tolerance_rad: 0.01
-  max_tracking_error_rad: 0.2
+  max_tracking_error_rad: 0.15
   ready_timeout_s: 120
 ```
 
@@ -149,8 +171,10 @@ runtime:
 difference during both activation and mission readiness. Hamburg reported a
 steady-state error of 0.003076 rad; the supplied profile uses 0.01 rad.
 `max_tracking_error_rad` is the C++ servo's maximum joint tracking error during
-motion. The supplied profile uses 0.2 rad, the lower end of Hamburg's requested
-0.2–0.4 rad range; the operator can set another finite positive value after
+motion. The profile restores the original 0.15 rad limit: the organizer traced
+the stow failure to relative GELLO mapping, superseding the earlier diagnosis
+of a startup transient needing a 0.2–0.4 rad guard. Correct command encoding is
+the fix. The operator can still set another finite positive value after
 evaluating the rig. These are thresholds, not speed controls. Errors above the
 configured limits still reject alignment or latch a servo fault. Profiles that
 omit these fields retain the original 0.003 and 0.15 rad defaults.
@@ -230,7 +254,7 @@ docker run --rm --platform linux/amd64 --network none \
   '/app/.venv/bin/python /app/tests/hamburg_ros_smoke.py'
 ```
 
-The complete physical mission still requires on-site verification after the
-command publisher handoff is arranged. TCP transforms and spine definitions
-are confirmed; the remaining organizer questions are in
+The complete physical mission still requires on-site verification. Command
+handoff, TCP transforms and spine definitions are confirmed; the organizer's
+operational confirmations are recorded in
 [HAMBURG_QUESTIONS.md](HAMBURG_QUESTIONS.md).

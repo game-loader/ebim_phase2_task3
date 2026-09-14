@@ -24,6 +24,7 @@ from rclpy.executors import SingleThreadedExecutor
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image, JointState, LaserScan
 from std_msgs.msg import Bool, Float32MultiArray, String
+from std_srvs.srv import Trigger
 from tf2_msgs.msg import TFMessage
 
 from franka_duo_tele_data.local_ros import decode, encode, type_name
@@ -44,12 +45,16 @@ class Gateway:
                                 (prefix + "/current_pose", PoseStamped),
                                 (f"/{side}/gripper/joint_states", JointState),
                                 (f"/{side}/gello/joint_states", JointState),
+                                (f"/franka_duo/joint_servo/{side}/target", JointState),
+                                (f"/{side}_gello_target_relay/mapping_status", String),
                                 (f"/franka_duo/measured/{side}_pose", PoseStamped)]:
                 self.subscribe(topic, kind)
             for name, kind in [("list_controllers", ListControllers), ("switch_controller", SwitchController),
                                ("configure_controller", ConfigureController)]:
                 self.service(f"/{side}/controller_manager/{name}", kind)
             self.service(f"/{side}_gello_target_relay/get_parameters", GetParameters)
+            for operation in ("prepare_mapping", "enable_mapping"):
+                self.service(f"/{side}_gello_target_relay/{operation}", Trigger)
         self.service("/franka_duo_joint_servo/get_parameters", GetParameters)
         self.service("/franka_spine_node/get_position", GetPosition)
         self.action_name = "/franka_spine_node/move_absolute"
@@ -120,7 +125,7 @@ class Gateway:
                         if t in self.latest and self.latest[t][0] > seq
                         # String status has no header; do not let a new local
                         # phase mistake a dead servo's cached status for live data.
-                        and (t != "/franka_duo/joint_servo/status"
+                        and (t != "/franka_duo/joint_servo/status" and not t.endswith("/mapping_status")
                              or time.monotonic() - self.received_at[t] <= 0.2)}
         if operation == "count":
             return getattr(self.node, "count_" + request["direction"])(request["topic"])

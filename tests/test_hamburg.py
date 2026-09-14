@@ -1,5 +1,4 @@
 import ast
-import ast
 import importlib.util
 import json
 import shlex
@@ -39,7 +38,8 @@ def test_motion_guard_defaults_and_overrides(tmp_path, hamburg):
     assert legacy["runtime"]["alignment_tolerance_rad"] == 0.003
     assert legacy["runtime"]["max_tracking_error_rad"] == 0.15
     assert hamburg["runtime"]["alignment_tolerance_rad"] == 0.01
-    assert hamburg["runtime"]["max_tracking_error_rad"] == 0.2
+    assert hamburg["runtime"]["max_tracking_error_rad"] == 0.15
+    assert hamburg["arms"]["command_mode"] == "gello_relative"
     raw = yaml.safe_load((ROOT / "hardware.hamburg.yaml").read_text())
     raw["runtime"]["max_tracking_error_rad"] = 0.4
     path = tmp_path / "hardware.yaml"
@@ -219,16 +219,34 @@ def test_failed_handoff_starts_no_target_stream(hamburg, tmp_path, monkeypatch, 
             raise RuntimeError("handoff incomplete")
     host.probe = probe
     with pytest.raises(RuntimeError, match="handoff incomplete"):
-        host.up(False)
+        host.up(True)
     host.start.assert_not_called()
 
 
 def test_external_start_never_loads_drivers_or_switches_controllers(hamburg, tmp_path, monkeypatch):
+    hamburg["arms"]["command_mode"] = "absolute"
     host = external_host(hamburg, tmp_path, monkeypatch)
     host.probe = Mock()
     host.up(False)
     assert [c.args[0] for c in host.probe.call_args_list] == ["inactive", "unowned", "check", "configure-impedance", "runtime-ready"]
     assert [c.args[0] for c in host.start.call_args_list] == ["external-servo", "routes"]
+
+
+def test_relative_gello_requires_activation_handshake_before_any_dds(hamburg, tmp_path, monkeypatch):
+    host = external_host(hamburg, tmp_path, monkeypatch)
+    with pytest.raises(RuntimeError, match="up --activate"):
+        host.up(False)
+    host.start_gateway.assert_not_called()
+    host.start.assert_not_called()
+
+
+def test_relative_gello_is_not_allowed_on_legacy_managed_runtime(tmp_path):
+    raw = yaml.safe_load((ROOT / "hardware.yaml").read_text())
+    raw["arms"]["command_mode"] = "gello_relative"
+    path = tmp_path / "hardware.yaml"
+    path.write_text(yaml.safe_dump(raw))
+    with pytest.raises(ValueError, match="activation handshake"):
+        load_hardware(path, require_calibration=False)
 
 
 def test_existing_command_publisher_blocks_handoff():

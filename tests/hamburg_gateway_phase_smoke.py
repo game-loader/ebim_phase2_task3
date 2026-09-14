@@ -15,6 +15,7 @@ from rcl_interfaces.srv import GetParameters
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import Float32MultiArray, MultiArrayDimension, String
+from std_srvs.srv import Trigger
 
 from franka_duo_tele_data.action_spec import matrix_to_rot6d
 from franka_duo_tele_data.camera_input import camera_matrix
@@ -55,8 +56,8 @@ def main():
     ros.spin_until_future_complete(node, future, timeout_sec=5)
     assert future.done()
     assert future.result().values[0].double_value == hardware["runtime"]["max_tracking_error_rad"]
-    # Exercise the real task -> socket -> DDS -> C++ IK/servo command path
-    # with a stationary TCP chunk, avoiding mock arm dynamics.
+    # Exercise the real task -> socket -> DDS -> C++ IK/servo -> mapped relay
+    # path. Stationary commands alone cannot reveal sign/activation errors.
     node.create_subscription(String, config["joint_servo_status_topic"],
                              lambda msg: latest.__setitem__("status", json.loads(msg.data)), 10)
     row = []
@@ -65,7 +66,10 @@ def main():
         row += [pose.position.x, pose.position.y, pose.position.z]
         row += matrix_to_rot6d(quaternion_to_matrix(pose.orientation)).tolist()
     row += [0., 0.]
-    values, dims, offset = chunk_payload(np.tile(row, (3, 1)), 0)
+    rows = np.tile(row, (12, 1))
+    rows[:, 0] += np.linspace(0, 0.01, len(rows))
+    rows[:, 9] += np.linspace(0, -0.01, len(rows))
+    values, dims, offset = chunk_payload(rows, 0)
     chunk = Float32MultiArray(data=values)
     chunk.layout.dim = [MultiArrayDimension(label="rows", size=dims[0], stride=dims[0] * dims[1]),
                         MultiArrayDimension(label="action", size=dims[1], stride=dims[1])]
@@ -77,10 +81,16 @@ def main():
         ros.spin_once(node)
         status = latest.get("status", {})
         assert not status.get("fault"), status
-        if status.get("chunks") == 1 and status.get("holding") and status.get("step", -1) >= 2:
+        if status.get("chunks") == 1 and status.get("holding") and status.get("step", -1) >= len(rows) - 1:
             break
     else:
         raise AssertionError(f"local phase chunk did not complete on the real servo: {status}")
+    for side in ("left", "right"):
+        # A late request must not overwrite the activation anchor.
+        client = node.create_client(Trigger, f"/{side}_gello_target_relay/prepare_mapping")
+        future = client.call_async(Trigger.Request())
+        ros.spin_until_future_complete(node, future, timeout_sec=5)
+        assert future.done() and not future.result().success
     node.destroy_node()
     # Construct the route controller used by outbound/return, including its TF
     # listener. Every subscription is served by the gateway's fixed endpoints.

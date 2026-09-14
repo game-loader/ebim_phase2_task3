@@ -1,4 +1,4 @@
-# Remaining Hamburg deployment questions
+# Hamburg deployment confirmations
 
 Thank you for the live interface details and attachments. We have incorporated
 Fast DDS UDP-only transport, 20 Hz RELIABLE/VOLATILE arm commands, automatic
@@ -6,7 +6,20 @@ impedance configuration/activation, and a resident ROS gateway so mission phase
 processes do not create new DDS participants. We use your `current_pose` directly
 as TCP in the corresponding arm's link0; no additional tool offset is applied.
 
-Two operational details remain:
+Both operational questions below have been answered by the organizer:
+
+- All arm, gripper and base command topics have publisher count zero; no pause
+  or mux interface is needed. The startup ownership check remains enabled.
+- Both `configure_controller` services are available and permitted on domain
+  0. The organizer also prepares both controllers as configured/inactive and
+  ensures the arms are out of Move mode before `check`.
+
+The organizer subsequently confirmed that GELLO commands are relative with
+directions `[-1, -1, 1, 1, 1, 1, -1]` and references captured at activation.
+The relay now encodes robot-space targets through that mapping; see
+[HAMBURG.md](HAMBURG.md) for the activation handshake.
+
+Original questions, retained for context:
 
 1. **Pausing existing command publishers**
 

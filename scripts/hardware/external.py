@@ -97,6 +97,8 @@ class ExternalHost(Host):
                 self.stop_gateway()
 
     def up(self, activate):
+        if self.config["arms"].get("command_mode") == "gello_relative" and not activate:
+            raise RuntimeError("gello_relative requires up --activate to synchronize controller and relay references")
         self.assert_no_conflicts()
         self.start_gateway()
         if activate:

@@ -13,6 +13,8 @@ from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 from probe import SIDES, Probe
 from sensor_msgs.msg import CameraInfo, Image, JointState, LaserScan
+from std_msgs.msg import String
+from std_srvs.srv import Trigger
 
 from franka_duo_tele_data.camera_input import camera_matrix
 from franka_duo_tele_data.ros_backend import ActionClient, ros as rclpy
@@ -109,7 +111,9 @@ class ExternalProbe(Probe):
             target = f"/{side}/gello/joint_states"
             self.watch(pose, PoseStamped)
             self.watch(target, JointState)
-            topics += [pose, target]
+            absolute = f"/franka_duo/joint_servo/{side}/target"
+            self.watch(absolute, JointState)
+            topics += [pose, target, absolute]
         self.wait(lambda: all(self.fresh(t, 0.2) for t in topics), "TCP poses and joint targets")
         self.wait(lambda: all(self.node.count_publishers(t) >= 1
                              for t in COMMANDS + ["/franka_duo/joint_servo/status"]),
@@ -152,20 +156,67 @@ class ExternalProbe(Probe):
             if self.controllers(side).get("joint_impedance_controller") != "inactive":
                 raise RuntimeError(side + " impedance must be configured and inactive")
 
+    def relative_gello(self):
+        return self.config.get("arms", {}).get("command_mode") == "gello_relative"
+
+    def mapping_call(self, side, operation):
+        client = self.client(f"/{side}_gello_target_relay/{operation}", Trigger)
+        if not client.wait_for_service(timeout_sec=3):
+            raise RuntimeError(side + " relay mapping service unavailable")
+        future = client.call_async(Trigger.Request())
+        rclpy.spin_until_future_complete(self.node, future, timeout_sec=5)
+        if not future.done() or future.result() is None or not future.result().success:
+            raise RuntimeError(side + " mapping transition failed; deactivate and restart runtime")
+
+    def mapping_state(self, side, expected):
+        topic = f"/{side}_gello_target_relay/mapping_status"
+        self.watch(topic, String, 10)
+        self.wait(lambda: self.fresh(topic, 0.2) and json.loads(self.latest[topic][0].data)["state"] == expected,
+                  side + " relay " + expected)
+        return json.loads(self.latest[topic][0].data)
+
+    def check_alignment(self, side, target):
+        measured = f"/{side}/franka_robot_state_broadcaster/measured_joint_states"
+        self.wait(lambda: self.fresh(target, 0.15) and self.fresh(measured, 0.15), "fresh aligned target")
+        alignment_error(self.latest[target][0], self.latest[measured][0], side,
+                        self.config["runtime"].get("alignment_tolerance_rad", 0.003))
+
+    def check_reference(self, side, reference):
+        topic = f"/{side}/gello/joint_states"
+        self.check_alignment(side, topic)
+        actual = joint_positions(self.latest[topic][0], side)
+        if len(reference) != 7 or any(abs(a - b) > 1e-9 for a, b in zip(actual, reference, strict=True)):
+            raise RuntimeError(side + " GELLO activation reference does not match the held output")
+
     def activate_impedance(self):
         self.runtime_ready()
         self.wait(lambda: self.servo_status().get("idle_latched") is True, "servo idle latch", 70)
         try:
             for side in SIDES:
                 target = f"/{side}/gello/joint_states"
-                measured = f"/{side}/franka_robot_state_broadcaster/measured_joint_states"
-                self.wait(lambda target=target, measured=measured:
-                          self.fresh(target, 0.15) and self.fresh(measured, 0.15), "fresh activation target")
-                alignment_error(self.latest[target][0], self.latest[measured][0], side,
-                                self.config["runtime"].get("alignment_tolerance_rad", 0.003))
+                if self.relative_gello():
+                    if self.controllers(side).get("joint_impedance_controller") != "inactive":
+                        raise RuntimeError(side + " must be inactive before latching the GELLO reference")
+                    self.check_alignment(side, f"/franka_duo/joint_servo/{side}/target")
+                    self.mapping_call(side, "prepare_mapping")
+                    state = self.mapping_state(side, "reference_held")
+                    # Wait for a periodic packet carrying the frozen reference.
+                    self.wait(lambda target=target, side=side, state=state: self.fresh(target, 0.15) and
+                              joint_positions(self.latest[target][0], side) == state["reference"],
+                              "held GELLO reference on graph")
+                    self.check_reference(side, state["reference"])
+                else:
+                    self.check_alignment(side, target)
                 self.switch(side, True)
                 if self.controllers(side).get("joint_impedance_controller") != "active":
                     raise RuntimeError(side + " activation did not reach active")
+                if self.relative_gello():
+                    self.check_reference(side, state["reference"])
+            # Neither arm receives a motion target until both activations pass.
+            if self.relative_gello():
+                for side in SIDES:
+                    self.mapping_call(side, "enable_mapping")
+                    self.mapping_state(side, "enabled")
         except Exception:
             self.deactivate_impedance()
             raise
@@ -176,11 +227,11 @@ class ExternalProbe(Probe):
         for side in SIDES:
             if self.controllers(side).get("joint_impedance_controller") != "active":
                 raise RuntimeError(side + " impedance must be activated before the mission")
-            topics = [f"/{side}/gello/joint_states", f"/{side}/franka_robot_state_broadcaster/measured_joint_states"]
-            self.wait(lambda topics=topics: all(self.fresh(t, 0.2) for t in topics), "fresh aligned joints")
-            alignment_error(self.latest[f"/{side}/gello/joint_states"][0],
-                            self.latest[f"/{side}/franka_robot_state_broadcaster/measured_joint_states"][0], side,
-                            self.config["runtime"].get("alignment_tolerance_rad", 0.003))
+            if self.relative_gello():
+                self.mapping_state(side, "enabled")
+                self.check_alignment(side, f"/franka_duo/joint_servo/{side}/target")
+            else:
+                self.check_alignment(side, f"/{side}/gello/joint_states")
 
 
 def main():

@@ -36,6 +36,7 @@ def generate_nodes(context):
                                     publish_measured_pose=str(role == "external-servo").lower()))
         nodes.append(package_launch("franka_duo_joint_servo", "gello_target_relay.launch.py",
                                     enable_robot="true", enable_gripper="true",
+                                    command_mode=config["arms"].get("command_mode", "absolute"),
                                     output_rate_hz=20.0 if role == "external-servo" else 0.0))
     elif role == "routes":
         nodes.append(ExecuteProcess(cmd=["/usr/bin/python3", str(root / "base/tmr_base/scripts/cmd_vel_adapter.py")], output="screen"))

@@ -278,7 +278,7 @@ def check_joint_servo_controllers(node, config, speed: float) -> None:
         relay = call(
             GetParameters,
             f"/{side}_gello_target_relay/get_parameters",
-            GetParameters.Request(names=["enable_robot", "output_topic", "input_topic"]),
+            GetParameters.Request(names=["enable_robot", "output_topic", "input_topic", "command_mode"]),
         )
         if (
             not relay.values[0].bool_value
@@ -286,6 +286,10 @@ def check_joint_servo_controllers(node, config, speed: float) -> None:
             or relay.values[2].string_value != f"/franka_duo/joint_servo/{side}/target"
         ):
             raise ValueError(f"{side} gello_target_relay must enable robot output on the site topics")
+        if config.get("gello_command_mode") == "gello_relative" and (
+            len(relay.values) < 4 or relay.values[3].string_value != "gello_relative"
+        ):
+            raise ValueError(f"{side} requires the relative GELLO relay for this controller")
         controllers = call(
             ListControllers, f"/{side}/controller_manager/list_controllers", ListControllers.Request()
         ).controller

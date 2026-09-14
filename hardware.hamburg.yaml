@@ -12,6 +12,7 @@ domains:
   base: 0
 arms:
   mode: external
+  command_mode: gello_relative
 grippers:
   mode: external
 spine:
@@ -29,5 +30,5 @@ camera:
 runtime:
   playback_speed: 0.1
   alignment_tolerance_rad: 0.01
-  max_tracking_error_rad: 0.2
+  max_tracking_error_rad: 0.15
   ready_timeout_s: 120

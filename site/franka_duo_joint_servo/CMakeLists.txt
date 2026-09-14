@@ -18,6 +18,7 @@ find_package(ruckig REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 
 ament_python_install_package(${PROJECT_NAME})
 
@@ -36,10 +37,12 @@ ament_target_dependencies(policy_chunk_joint_servo
 )
 
 add_executable(gello_target_relay src/gello_target_relay.cpp)
+target_include_directories(gello_target_relay PRIVATE include)
 ament_target_dependencies(gello_target_relay
   rclcpp
   sensor_msgs
   std_msgs
+  std_srvs
 )
 
 add_executable(check_robot_model src/check_robot_model.cpp)
@@ -66,6 +69,8 @@ install(FILES README.md MODEL.md DESTINATION share/${PROJECT_NAME})
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_joint_timeline test/test_joint_timeline.cpp)
+  ament_add_gtest(test_gello_mapping test/test_gello_mapping.cpp)
+  target_include_directories(test_gello_mapping PRIVATE include)
   target_include_directories(test_joint_timeline PRIVATE include)
   ament_add_gtest(test_joint_ruckig_tracker test/test_joint_ruckig_tracker.cpp)
   target_include_directories(test_joint_ruckig_tracker PRIVATE include)

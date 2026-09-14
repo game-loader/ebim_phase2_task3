@@ -5,17 +5,25 @@
 // enable_robot is true, and Float32 gripper targets to the site gripper
 // client only when enable_gripper is true.  Targets must carry the expected
 // seven joint names in order, finite values and a fresh stamp.
+// Hamburg gello_relative mode holds measured joints across the explicit
+// activation handshake, then maps robot-space targets into GELLO coordinates.
 
 #include <chrono>
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <sstream>
+#include <set>
 #include <vector>
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <std_msgs/msg/float32.hpp>
+#include <std_msgs/msg/string.hpp>
+#include <std_srvs/srv/trigger.hpp>
+#include "franka_duo_joint_servo/gello_mapping.hpp"
 
 class GelloTargetRelay final : public rclcpp::Node {
  public:
@@ -34,6 +42,8 @@ class GelloTargetRelay final : public rclcpp::Node {
     // a fresh stamp so the arm holds its pose instead of losing the driver.
     declare_parameter<bool>("hold_on_input_loss", true);
     declare_parameter<double>("output_rate_hz", 0.0);
+    declare_parameter<std::string>("command_mode", "absolute");
+    declare_parameter<std::string>("measured_topic", "");
 
     input_topic_ = get_parameter("input_topic").as_string();
     output_topic_ = get_parameter("output_topic").as_string();
@@ -45,6 +55,11 @@ class GelloTargetRelay final : public rclcpp::Node {
     enable_gripper_ = get_parameter("enable_gripper").as_bool();
     hold_on_input_loss_ = get_parameter("hold_on_input_loss").as_bool();
     output_rate_hz_ = get_parameter("output_rate_hz").as_double();
+    const auto mode = get_parameter("command_mode").as_string();
+    if (mode != "absolute" && mode != "gello_relative") {
+      throw std::invalid_argument("unknown command_mode");
+    }
+    relative_ = mode == "gello_relative";
     if (!std::isfinite(output_rate_hz_) || output_rate_hz_ < 0.0 ||
         (output_rate_hz_ > 0.0 && output_rate_hz_ < 10.0)) {
       throw std::invalid_argument("output_rate_hz must be zero (passthrough) or at least 10 Hz");
@@ -64,6 +79,22 @@ class GelloTargetRelay final : public rclcpp::Node {
     subscription_ = create_subscription<sensor_msgs::msg::JointState>(
         input_topic_, rclcpp::QoS(1).reliable(),
         [this](const sensor_msgs::msg::JointState::SharedPtr message) { forward(*message); });
+    if (relative_) {
+      const auto topic = get_parameter("measured_topic").as_string();
+      if (topic.empty() || output_rate_hz_ <= 0.0 || !hold_on_input_loss_) {
+        throw std::invalid_argument("gello_relative requires measured_topic, periodic output and hold_on_input_loss");
+      }
+      measured_subscription_ = create_subscription<sensor_msgs::msg::JointState>(
+          topic, rclcpp::SensorDataQoS(),
+          [this](const sensor_msgs::msg::JointState::SharedPtr message) { measured(*message); });
+      mapping_status_ = create_publisher<std_msgs::msg::String>("~/mapping_status", 10);
+      prepare_service_ = create_service<std_srvs::srv::Trigger>("~/prepare_mapping",
+          [this](const std_srvs::srv::Trigger::Request::SharedPtr,
+                 std_srvs::srv::Trigger::Response::SharedPtr response) { transition(false, *response); });
+      enable_service_ = create_service<std_srvs::srv::Trigger>("~/enable_mapping",
+          [this](const std_srvs::srv::Trigger::Request::SharedPtr,
+                 std_srvs::srv::Trigger::Response::SharedPtr response) { transition(true, *response); });
+    }
     if (!gripper_input_topic_.empty() && !gripper_output_topic_.empty()) {
       gripper_publisher_ =
           create_publisher<std_msgs::msg::Float32>(gripper_output_topic_, rclcpp::QoS(10).reliable());
@@ -72,8 +103,8 @@ class GelloTargetRelay final : public rclcpp::Node {
           [this](const std_msgs::msg::Float32::SharedPtr message) { forwardGripper(*message); });
     }
     RCLCPP_INFO(
-        get_logger(), "Relay %s -> %s; enable_robot=%s enable_gripper=%s", input_topic_.c_str(),
-        output_topic_.c_str(), enable_robot_ ? "true" : "false", enable_gripper_ ? "true" : "false");
+        get_logger(), "Relay %s -> %s; mode=%s enable_robot=%s enable_gripper=%s", input_topic_.c_str(),
+        output_topic_.c_str(), mode.c_str(), enable_robot_ ? "true" : "false", enable_gripper_ ? "true" : "false");
     if (enable_robot_) {
       RCLCPP_WARN(get_logger(), "Robot output ENABLED: targets reach the joint impedance controller");
     }
@@ -84,6 +115,7 @@ class GelloTargetRelay final : public rclcpp::Node {
           held.header.stamp = now();
           publisher_->publish(held);
         }
+        if (relative_) publishMappingStatus();
       });
     } else if (hold_on_input_loss_) {
       hold_timer_ = create_wall_timer(std::chrono::milliseconds(5), [this] { holdTick(); });
@@ -91,6 +123,70 @@ class GelloTargetRelay final : public rclcpp::Node {
   }
 
  private:
+  using Mapping = franka_duo_joint_servo::GelloMapping;
+
+  bool freshStamp(const sensor_msgs::msg::JointState& message) const {
+    const double age = (now() - rclcpp::Time(message.header.stamp)).seconds();
+    return age >= -max_target_age_s_ && age <= max_target_age_s_;
+  }
+
+  void measured(const sensor_msgs::msg::JointState& message) {
+    if (!freshStamp(message) || message.name.size() != message.position.size() ||
+        std::set<std::string>(message.name.begin(), message.name.end()).size() != message.name.size()) return;
+    Mapping::Joints ordered{};
+    for (size_t i = 0; i < ordered.size(); ++i) {
+      auto it = std::find(message.name.begin(), message.name.end(), expected_joint_names_[i]);
+      if (it == message.name.end()) return;
+      ordered[i] = message.position[std::distance(message.name.begin(), it)];
+      if (!std::isfinite(ordered[i])) return;
+    }
+    mapping_.observe(ordered);
+    last_measured_ = message;
+    // No servo target, however distant, may become the activation reference.
+    if (!mapping_.prepared()) storeMapped(ordered);
+  }
+
+  void storeMapped(const Mapping::Joints& target) {
+    const auto encoded = mapping_.encode(target);
+    last_forwarded_.name = expected_joint_names_;
+    last_forwarded_.position.assign(encoded.begin(), encoded.end());
+    // Only positions are consumed by this interface. Do not leak robot-space
+    // velocity/effort arrays into GELLO coordinates.
+    last_forwarded_.velocity.clear();
+    last_forwarded_.effort.clear();
+    last_forwarded_.header.stamp = now();
+    last_forward_time_ = std::chrono::steady_clock::now();
+    have_last_ = true;
+  }
+
+  void transition(bool enable, std_srvs::srv::Trigger::Response& response) {
+    try {
+      if (!enable_robot_ || !mapping_.observed() || !freshStamp(last_measured_) ||
+          !valid(last_target_)) throw std::logic_error("fresh measured joints and servo target required");
+      if (enable) mapping_.enable(); else mapping_.prepare();
+      Mapping::Joints target{};
+      std::copy_n(last_target_.position.begin(), 7, target.begin());
+      storeMapped(target);
+      response.success = true;
+    } catch (const std::exception& error) {
+      response.success = false;
+      response.message = error.what();
+    }
+    publishMappingStatus();
+  }
+
+  void publishMappingStatus() {
+    std::ostringstream stream;
+    stream.precision(17);
+    stream << "{\"state\":\"" << (mapping_.enabled() ? "enabled" :
+        mapping_.prepared() ? "reference_held" : "following_measured") << "\",\"reference\":[";
+    for (size_t i = 0; i < 7; ++i) stream << (i ? "," : "") << mapping_.reference()[i];
+    stream << "]}";
+    std_msgs::msg::String message;
+    message.data = stream.str();
+    mapping_status_->publish(message);
+  }
+
   void holdTick() {
     if (!enable_robot_ || !have_last_) {
       return;
@@ -134,6 +230,15 @@ class GelloTargetRelay final : public rclcpp::Node {
           input_topic_.c_str());
       return;
     }
+    if (relative_) {
+      last_target_ = message;
+      if (mapping_.observed()) {
+        Mapping::Joints target{};
+        std::copy_n(message.position.begin(), 7, target.begin());
+        storeMapped(target);
+      }
+      return;
+    }
     if (output_rate_hz_ == 0.0) {
       publisher_->publish(message);
     }
@@ -162,6 +267,12 @@ class GelloTargetRelay final : public rclcpp::Node {
   bool hold_on_input_loss_{true};
   double output_rate_hz_{0.0};
   bool have_last_{false};
+  bool relative_{false};
+  Mapping mapping_;
+  sensor_msgs::msg::JointState last_measured_, last_target_;
+  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr measured_subscription_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr mapping_status_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr prepare_service_, enable_service_;
   sensor_msgs::msg::JointState last_forwarded_;
   std::chrono::steady_clock::time_point last_forward_time_{};
   rclcpp::TimerBase::SharedPtr hold_timer_;
